@@ -345,9 +345,10 @@
 
     <div class="card">
       <h2><span class="num">1</span>医薬品を検索して追加</h2>
-      <p class="note">薬品名・成分名の一部（ひらがな／カタカナ／英数字）で検索できます。ひらがなで入力してもカタカナ表記の薬品名にヒットします。複数ワードはスペース区切り。</p>
+      <p class="note">薬品名・成分名の一部（ひらがな／カタカナ／英数字）で検索できます。ひらがなで入力してもカタカナ表記の薬品名にヒットします。複数ワードはスペース区切り。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
       <div class="catbtns">
-        <button data-cat="naifuku" class="active">内服</button>
+        <button data-cat="all" class="active">すべて</button>
+        <button data-cat="naifuku">内服</button>
         <button data-cat="gaiyou">外用</button>
         <button data-cat="chusha">注射</button>
       </div>
@@ -553,7 +554,7 @@ const CHUSHA_FREQ = ['1日1回','1日2回','1日3回','1日〇回','フリー入
 const LS_SETTINGS = 'recepc_settings_v1';
 const state = {
   settings: loadSettings(),
-  currentCat: 'naifuku',
+  currentCat: 'all',
   pendingDrug: null,
   items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
   editingId: null,
@@ -685,47 +686,71 @@ document.querySelectorAll('.catbtns button').forEach(b=>{
     document.querySelectorAll('.catbtns button').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     state.currentCat = b.dataset.cat;
-    document.getElementById('drugSearch').value='';
-    document.getElementById('drugResults').innerHTML='';
-    state.pendingDrug=null;
-    renderPending();
+    runDrugSearch();
   });
 });
 
 const drugSearchInput = document.getElementById('drugSearch');
-drugSearchInput.addEventListener('input', ()=>{
+function runDrugSearch(){
   const q = drugSearchInput.value.trim();
   const resEl = document.getElementById('drugResults');
   if(!q){ resEl.innerHTML=''; return; }
   const terms = q.split(/\s+/).filter(Boolean).map(t=>hiraToKana(t.toLowerCase()));
-  const list = window.DRUG_DATA[state.currentCat] || [];
+  const cats = state.currentCat==='all' ? ['naifuku','gaiyou','chusha'] : [state.currentCat];
   let results = [];
-  for(let i=0;i<list.length && results.length<40;i++){
-    const row = list[i]; // [品名,成分名,規格,薬価,メーカー,局,麻]
-    const hay = hiraToKana((row[0]+' '+row[1]+' '+row[2]).toLowerCase());
-    if(terms.every(t=>hay.includes(t))) results.push(row);
+  outer:
+  for(const cat of cats){
+    const list = window.DRUG_DATA[cat] || [];
+    for(let i=0;i<list.length;i++){
+      const row = list[i]; // [品名,成分名,規格,薬価,メーカー,局,麻]
+      const hay = hiraToKana((row[0]+' '+row[1]+' '+row[2]).toLowerCase());
+      if(terms.every(t=>hay.includes(t))){
+        results.push({row, cat});
+        if(results.length>=60) break outer;
+      }
+    }
   }
   if(results.length===0){ resEl.innerHTML = '<div class="row"><span>該当する医薬品が見つかりません</span></div>'; return; }
-  resEl.innerHTML = results.map((r,idx)=>`
+  resEl.innerHTML = results.map((res,idx)=>{
+    const r = res.row;
+    return `
     <div class="row" data-idx="${idx}">
-      <span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
+      <span><span class="badge" style="margin-left:0;margin-right:6px;">${CAT_LABEL[res.cat]}</span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
       <span class="meta">${r[3]}円${r[6]?'｜麻':''}</span>
     </div>
-  `).join('');
+  `;}).join('');
   resEl.querySelectorAll('.row[data-idx]').forEach(el=>{
     el.addEventListener('click', ()=>{
-      const r = results[Number(el.dataset.idx)];
-      selectDrug(r);
+      const res = results[Number(el.dataset.idx)];
+      selectDrug(res.row, res.cat);
       resEl.innerHTML='';
       drugSearchInput.value='';
     });
   });
-});
+}
+drugSearchInput.addEventListener('input', runDrugSearch);
 
-function selectDrug(row){
+// 規格が「１０ｇ」「１０ｍＬ」のように単位のみで表される場合、薬価はその数量あたりの価格。
+// このとき1g／1mLあたりの単価に換算しないと総量計算がずれるため補正する。
+function zenkakuToNum(s){
+  return s.replace(/[０-９．]/g, ch => '0123456789.'['０１２３４５６７８９．'.indexOf(ch)]);
+}
+function specMultiplier(spec){
+  if(!spec) return 1;
+  const m = spec.match(/^([0-9０-９]+(?:[.．][0-9０-９]+)?)(ｇ|ｍＬ|ｍｌ)$/);
+  if(!m) return 1;
+  const n = parseFloat(zenkakuToNum(m[1]));
+  return (n && n>0) ? n : 1;
+}
+
+function selectDrug(row, cat){
   state.editingId = null;
+  const rawPrice = Number(row[3])||0;
+  const mult = specMultiplier(row[2]);
   state.pendingDrug = {
-    name:row[0], generic:row[1], spec:row[2], price:Number(row[3])||0, cat:state.currentCat,
+    name:row[0], generic:row[1], spec:row[2], rawPrice, specMultiplier:mult,
+    price: mult!==1 ? rawPrice/mult : rawPrice, // 内部計算用（1g/1mLあたりなどの単価）
+    cat: cat || state.currentCat,
     isPicos: row[0].includes('ピコスルファート') || row[1].includes('ピコスルファート'),
   };
   renderPending();
@@ -765,7 +790,11 @@ function renderPending(){
 
   el.innerHTML = `
     <div class="pending">
-      <div class="drugname">${isEditing?'✎ 編集：':''}${d.name} <span class="pt" style="margin-left:8px;">${d.price}円${d.spec?'／'+d.spec:''}</span></div>
+      <div class="drugname">${isEditing?'✎ 編集：':''}${d.name}
+        ${d.specMultiplier && d.specMultiplier!==1
+          ? `<span class="pt" style="margin-left:8px;">薬価：${d.rawPrice}円／${d.spec}　→　計算上は1${(d.spec||'').includes('ｍＬ')?'mL':'g'}あたり${d.price.toFixed(2)}円で計算</span>`
+          : `<span class="pt" style="margin-left:8px;">${d.price}円${d.spec?'／'+d.spec:''}</span>`}
+      </div>
       <div class="fieldline">
         <label>${cat==='naifuku'?'1日量':'総量'}<input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" style="width:90px;"></label>
         <label>用法<span id="pFreqWrap">${freqHtml}</span></label>
@@ -859,6 +888,8 @@ function addPendingItem(){
   state.editingId=null;
   renderPending();
   renderItemList();
+  const searchInput = document.getElementById('drugSearch');
+  if(searchInput) searchInput.focus();
 }
 
 function removeItem(id){
