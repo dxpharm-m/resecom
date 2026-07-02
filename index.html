@@ -365,7 +365,7 @@
 
     <div class="card">
       <h2><span class="num">1</span>医薬品を検索して追加</h2>
-      <p class="note">薬品名・成分名の一部（ひらがな／カタカナ／英数字）で検索できます。ひらがなで入力してもカタカナ表記の薬品名にヒットします。複数ワードはスペース区切り。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
+      <p class="note">検索欄はカタカナ・数字のみ入力できます（ひらがなで入力すると自動でカタカナに変換されます）。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
       <div class="catbtns">
         <button data-cat="all" class="active">すべて</button>
         <button data-cat="naifuku">内服</button>
@@ -373,7 +373,7 @@
         <button data-cat="chusha">注射</button>
       </div>
       <div class="searchwrap">
-        <input type="text" id="drugSearch" placeholder="例：アムロジン／ロキソニン／かぜ薬 など" style="width:100%;padding:11px;" autocomplete="off">
+        <input type="text" id="drugSearch" placeholder="例：アムロジン／ロキソニン／ムコダイン" style="width:100%;padding:11px;" autocomplete="off" inputmode="katakana">
         <div id="drugResults"></div>
       </div>
 
@@ -404,6 +404,14 @@
       <div class="grid" id="kanriFreqOpts" style="margin-bottom:12px;"></div>
       <p class="note" style="margin-bottom:6px;">その他の薬学管理料</p>
       <div class="grid" id="kanriOpts"></div>
+      <div class="pending" id="gairai2Box" style="display:none;">
+        <div class="drugname">外来服薬支援料2（一包化）の点数計算</div>
+        <p class="note" style="margin-bottom:8px;">投薬日数に応じて自動で点数を判定します。</p>
+        <div class="fieldline">
+          <label>投薬日数<input type="number" id="gairai2Days" min="1" value="7" style="width:90px;"></label>
+          <span class="pt" id="gairai2PtPreview" style="margin-top:16px;"></span>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -506,6 +514,16 @@ function bukkaPoints(){
   const cutoff = new Date(2027,5,1); // 令和9(2027)年6月1日
   return new Date() >= cutoff ? 2 : 1;
 }
+// 外来服薬支援料2（一包化）：投薬日数に応じた点数テーブル
+function gairai2Points(days){
+  if(days<=7) return 34;
+  if(days<=14) return 68;
+  if(days<=21) return 102;
+  if(days<=28) return 136;
+  if(days<=35) return 170;
+  if(days<=42) return 204;
+  return 240;
+}
 const FREE_LABELS = ['フリー入力','1日〇回','※フリー入力','※外用フリー入力'];
 function isFreeLabel(v){ return FREE_LABELS.includes(v); }
 function hiraToKana(s){
@@ -533,8 +551,7 @@ const KANRI = [
   {id:'m12', label:'かかりつけ薬剤師指導料フォローアップ', pt:50},
   {id:'m13', label:'かかりつけ薬剤師訪問指導料', pt:230},
   {id:'m14', label:'外来服薬支援料1', pt:185},
-  {id:'m15', label:'外来服薬支援料2（7日分以下）', pt:34},
-  {id:'m16', label:'外来服薬支援料2（43日分以上）', pt:240},
+  {id:'gairai2', label:'外来服薬支援料2（一包化）', pt:0, special:'gairai2'},
   {id:'m17', label:'服用薬剤調製支援料1', pt:125},
   {id:'m18', label:'服用薬剤調製支援料2', pt:1000},
   {id:'m19', label:'調剤後薬剤管理指導料', pt:60},
@@ -585,6 +602,7 @@ const state = {
   tekiyoQty: {}, // id -> number (算定回数、2回以上算定時のみ使用)
   jikaNaifuku: null, // {days, tablet}
   kanriChecked: {},
+  gairai2: null, // {days} 外来服薬支援料2（一包化）
   jikangai: 'none',
   bukkaEnabled: true,
   futan: '3',
@@ -700,12 +718,35 @@ function renderKanriOpts(){
   const otherEl = document.getElementById('kanriOpts');
   const mk = (o, cls)=>`<label class="opt ${cls||''}"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>`;
   freqEl.innerHTML = KANRI.filter(o=>o.freq).map(o=>mk(o,'freq')).join('');
-  otherEl.innerHTML = KANRI.filter(o=>!o.freq).map(o=>mk(o)).join('');
+  otherEl.innerHTML = KANRI.filter(o=>!o.freq && !o.special).map(o=>mk(o)).join('')
+    + `<label class="opt"><input type="checkbox" id="gairai2Chk" ${state.gairai2?'checked':''}>外来服薬支援料2（一包化）<span class="pt badge">日数で自動計算</span></label>`;
   [freqEl, otherEl].forEach(el=>{
-    el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+    el.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
       state.kanriChecked[e.target.dataset.id] = e.target.checked;
     }));
   });
+
+  const gairai2Chk = document.getElementById('gairai2Chk');
+  const box = document.getElementById('gairai2Box');
+  const updatePreview = ()=>{
+    if(!state.gairai2) return;
+    const pt = gairai2Points(state.gairai2.days);
+    document.getElementById('gairai2PtPreview').textContent = `${state.gairai2.days}日分 → ${pt}点`;
+  };
+  gairai2Chk.addEventListener('change', e=>{
+    if(e.target.checked){
+      box.style.display='block';
+      state.gairai2 = {days: Number(document.getElementById('gairai2Days').value)||7};
+      updatePreview();
+    } else {
+      box.style.display='none';
+      state.gairai2 = null;
+    }
+  });
+  document.getElementById('gairai2Days').addEventListener('input', e=>{
+    if(state.gairai2){ state.gairai2.days = Math.max(1, Number(e.target.value)||1); updatePreview(); }
+  });
+  if(state.gairai2){ box.style.display='block'; updatePreview(); }
 }
 
 function renderJikangaiOpts(){
@@ -779,7 +820,29 @@ function runDrugSearch(){
     });
   });
 }
-drugSearchInput.addEventListener('input', runDrugSearch);
+drugSearchInput.addEventListener('input', ()=>{
+  if(drugSearchInput.dataset.composing==='1') return; // IME変換中はそのまま（変換確定後にサニタイズ）
+  sanitizeSearchInput();
+  runDrugSearch();
+});
+drugSearchInput.addEventListener('compositionstart', ()=>{ drugSearchInput.dataset.composing='1'; });
+drugSearchInput.addEventListener('compositionend', ()=>{
+  drugSearchInput.dataset.composing='0';
+  sanitizeSearchInput();
+  runDrugSearch();
+});
+
+// 検索欄はカタカナ・数字（＋スペース区切り）のみ許可。ひらがなはカタカナへ自動変換し、
+// それ以外の文字（漢字・アルファベット等）は入力できないよう随時取り除く。
+function sanitizeSearchInput(){
+  const el = drugSearchInput;
+  const before = el.value;
+  const converted = hiraToKana(before);
+  const cleaned = converted.replace(/[^\u30A0-\u30FF\uFF66-\uFF9F0-9０-９\s]/g, '');
+  if(cleaned !== before){
+    el.value = cleaned;
+  }
+}
 
 // 規格が「１０ｇ」「１０ｍＬ」のように単位のみで表される場合、薬価はその数量あたりの価格。
 // このとき1g／1mLあたりの単価に換算しないと総量計算がずれるため補正する。
@@ -1100,7 +1163,15 @@ function calcAll(){
   // ---- 薬学管理料 ----
   let kanriGakuTotal = 0;
   const kanriGakuDetail = [];
-  KANRI.forEach(o=>{ if(state.kanriChecked[o.id]){ kanriGakuTotal += o.pt; kanriGakuDetail.push(`${o.label} = ${o.pt}点`); } });
+  KANRI.forEach(o=>{
+    if(o.special) return;
+    if(state.kanriChecked[o.id]){ kanriGakuTotal += o.pt; kanriGakuDetail.push(`${o.label} = ${o.pt}点`); }
+  });
+  if(state.gairai2){
+    const pt = gairai2Points(state.gairai2.days);
+    kanriGakuTotal += pt;
+    kanriGakuDetail.push(`外来服薬支援料2（一包化）：${state.gairai2.days}日分 = ${pt}点`);
+  }
 
   // ---- 基本料関連 ----
   const kihonryoObj = KIHONRYO.find(o=>o.id===state.settings.kihonryo) || {pt:0};
@@ -1204,6 +1275,7 @@ function clearPrescriptionState(){
   state.tekiyoQty = {};
   state.jikaNaifuku = null;
   state.kanriChecked = {};
+  state.gairai2 = null;
   state.jikangai='none';
   state.bukkaEnabled = true;
   renderItemList();
@@ -1213,6 +1285,7 @@ function clearPrescriptionState(){
   renderJikangaiOpts();
   renderBukkaOpts();
   document.getElementById('jikaNaifukuBox').style.display='none';
+  document.getElementById('gairai2Box').style.display='none';
 }
 
 function resetPrescription(){
