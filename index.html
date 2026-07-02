@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>薬局レセコン電卓｜2026年6月改定対応</title>
+<style>
+  :root{
+    --navy:#12324a;
+    --navy-deep:#0b2233;
+    --teal:#1c7a72;
+    --teal-light:#e6f2f0;
+    --paper:#f6f4ee;
+    --card:#ffffff;
+    --line:#dcdfe2;
+    --ink:#1f2a30;
+    --ink-soft:#5c6870;
+    --amber:#c9772b;
+    --red:#b3432f;
+    --radius:10px;
+    font-size:16px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    padding-bottom:60px;
+  }
+  header{
+    background:linear-gradient(135deg,var(--navy-deep),var(--navy));
+    color:#fff;
+    padding:18px 16px 14px;
+    position:sticky;
+    top:0;
+    z-index:50;
+    box-shadow:0 2px 10px rgba(0,0,0,.15);
+  }
+  header h1{
+    margin:0;
+    font-size:1.15rem;
+    letter-spacing:.02em;
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  header h1 small{
+    font-size:.62rem;
+    font-weight:500;
+    background:rgba(255,255,255,.15);
+    padding:3px 8px;
+    border-radius:100px;
+    letter-spacing:.05em;
+  }
+  nav.tabs{
+    display:flex;
+    gap:6px;
+    margin-top:12px;
+    overflow-x:auto;
+  }
+  nav.tabs button{
+    flex:0 0 auto;
+    background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.18);
+    color:#cfe3e0;
+    padding:8px 14px;
+    border-radius:100px;
+    font-size:.85rem;
+    cursor:pointer;
+    transition:.15s;
+    white-space:nowrap;
+  }
+  nav.tabs button.active{
+    background:var(--teal);
+    border-color:var(--teal);
+    color:#fff;
+    font-weight:600;
+  }
+  main{
+    max-width:920px;
+    margin:0 auto;
+    padding:16px;
+  }
+  .panel{display:none;}
+  .panel.active{display:block;animation:fade .15s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px;
+    margin-bottom:14px;
+  }
+  .card h2{
+    font-size:.95rem;
+    margin:0 0 4px;
+    color:var(--navy);
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .card h2 .num{
+    background:var(--teal);
+    color:#fff;
+    width:20px;height:20px;
+    border-radius:50%;
+    font-size:.68rem;
+    display:flex;align-items:center;justify-content:center;
+    flex:0 0 auto;
+  }
+  .card p.note{
+    font-size:.76rem;
+    color:var(--ink-soft);
+    margin:0 0 12px;
+    line-height:1.5;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:8px;
+  }
+  label.opt{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:.82rem;
+    cursor:pointer;
+    background:#fafaf8;
+  }
+  label.opt:has(input:checked){
+    background:var(--teal-light);
+    border-color:var(--teal);
+    font-weight:600;
+  }
+  label.opt input{accent-color:var(--teal);}
+  .pt{
+    margin-left:auto;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+    font-size:.76rem;
+  }
+  select,input[type=text],input[type=number]{
+    font-family:inherit;
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:8px 10px;
+    font-size:.88rem;
+    background:#fff;
+    color:var(--ink);
+  }
+  button.btn{
+    font-family:inherit;
+    border:none;
+    border-radius:8px;
+    padding:9px 16px;
+    font-size:.85rem;
+    cursor:pointer;
+    background:var(--teal);
+    color:#fff;
+    font-weight:600;
+  }
+  button.btn.ghost{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink-soft);
+  }
+  button.btn.danger{background:var(--red);}
+  button.btn:disabled{opacity:.4;cursor:not-allowed;}
+  .searchwrap{position:relative;}
+  #drugResults{
+    position:absolute;
+    left:0;right:0;
+    top:100%;
+    background:#fff;
+    border:1px solid var(--line);
+    border-top:none;
+    max-height:280px;
+    overflow-y:auto;
+    z-index:40;
+    border-radius:0 0 8px 8px;
+    box-shadow:0 8px 20px rgba(0,0,0,.1);
+  }
+  #drugResults div.row{
+    padding:9px 12px;
+    border-bottom:1px solid #eee;
+    cursor:pointer;
+    font-size:.83rem;
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+  }
+  #drugResults div.row:hover{background:var(--teal-light);}
+  #drugResults div.row .meta{color:var(--ink-soft);font-size:.74rem;}
+  .catbtns{display:flex;gap:6px;margin-bottom:8px;}
+  .catbtns button{
+    flex:1;
+    border:1px solid var(--line);
+    background:#fafaf8;
+    border-radius:7px;
+    padding:8px;
+    font-size:.82rem;
+    cursor:pointer;
+  }
+  .catbtns button.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+  table.itemtbl{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:6px;}
+  table.itemtbl th{
+    text-align:left;
+    font-size:.7rem;
+    color:var(--ink-soft);
+    border-bottom:1px solid var(--line);
+    padding:6px 4px;
+    font-weight:600;
+  }
+  table.itemtbl td{
+    padding:7px 4px;
+    border-bottom:1px solid #eee;
+    vertical-align:middle;
+  }
+  table.itemtbl td.name{font-weight:600;}
+  table.itemtbl td.small{color:var(--ink-soft);font-size:.72rem;}
+  .rowdel{background:none;border:none;color:var(--red);cursor:pointer;font-size:.95rem;}
+  .fieldline{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;}
+  .fieldline label{font-size:.78rem;color:var(--ink-soft);display:flex;flex-direction:column;gap:3px;}
+  .pending{
+    background:var(--teal-light);
+    border:1px dashed var(--teal);
+    border-radius:8px;
+    padding:12px;
+    margin-top:10px;
+  }
+  .pending .drugname{font-weight:700;color:var(--navy);margin-bottom:6px;}
+  .breakdown{width:100%;border-collapse:collapse;font-size:.86rem;}
+  .breakdown td{padding:7px 4px;border-bottom:1px solid #eee;}
+  .breakdown td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .breakdown tr.total td{font-weight:700;color:var(--navy);border-top:2px solid var(--navy);font-size:1rem;}
+  .totalbox{
+    background:linear-gradient(135deg,var(--navy-deep),var(--navy));
+    color:#fff;
+    border-radius:12px;
+    padding:20px;
+    margin-top:14px;
+    text-align:center;
+  }
+  .totalbox .big{font-size:2.1rem;font-weight:700;font-variant-numeric:tabular-nums;}
+  .totalbox .lbl{font-size:.78rem;opacity:.8;margin-bottom:4px;}
+  .badge{
+    display:inline-block;
+    font-size:.68rem;
+    background:var(--amber);
+    color:#fff;
+    padding:2px 7px;
+    border-radius:100px;
+    margin-left:6px;
+  }
+  .warn{
+    background:#fff4e8;
+    border:1px solid #f0c896;
+    color:#8a5a1c;
+    padding:10px 12px;
+    border-radius:8px;
+    font-size:.78rem;
+    line-height:1.5;
+    margin-bottom:12px;
+  }
+  .empty{color:var(--ink-soft);font-size:.82rem;padding:14px 4px;text-align:center;}
+  .flexbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  footer{
+    text-align:center;
+    font-size:.7rem;
+    color:var(--ink-soft);
+    padding:24px 16px 10px;
+  }
+  ::selection{background:var(--teal-light);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💊 薬局レセコン電卓 <small>2026年6月改定対応</small></h1>
+  <nav class="tabs">
+    <button data-tab="settings" class="active">① 基本料設定</button>
+    <button data-tab="prescribe">② 処方入力</button>
+    <button data-tab="result">③ 結果</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ TAB 1: 基本料設定 ============ -->
+  <section id="tab-settings" class="panel active">
+    <div class="warn">この設定は薬局ごとに一度決めればOK。ブラウザに保存され、次回処方時もそのまま使われます（変更したらここで直せます）。</div>
+
+    <div class="card">
+      <h2><span class="num">1</span>調剤基本料（いずれか1つ）</h2>
+      <p class="note">当薬局が算定する基本料を選択してください。</p>
+      <div class="grid" id="kihonryoOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>地域支援体制加算・医薬品供給体制加算（いずれか1つ／なしも可）</h2>
+      <div class="grid" id="chiikiOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3</span>その他の基本料加算（複数選択可）</h2>
+      <div class="grid" id="sonotaOpts"></div>
+    </div>
+
+    <div class="card">
+      <p class="note" style="margin:0;">設定は自動保存されます。「② 処方入力」タブへ進んでください。</p>
+    </div>
+  </section>
+
+  <!-- ============ TAB 2: 処方入力 ============ -->
+  <section id="tab-prescribe" class="panel">
+
+    <div class="card">
+      <h2><span class="num">1</span>医薬品を検索して追加</h2>
+      <p class="note">薬品名・成分名の一部（かな／カナ／英数字）で検索できます。複数ワードはスペース区切り。</p>
+      <div class="catbtns">
+        <button data-cat="naifuku" class="active">内服</button>
+        <button data-cat="gaiyou">外用</button>
+        <button data-cat="chusha">注射</button>
+      </div>
+      <div class="searchwrap">
+        <input type="text" id="drugSearch" placeholder="例：アムロジン／ロキソニン／かぜ薬 など" style="width:100%;padding:11px;" autocomplete="off">
+        <div id="drugResults"></div>
+      </div>
+
+      <div id="pendingArea"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>追加済みの処方リスト</h2>
+      <div id="itemListWrap"><p class="empty">まだ医薬品が追加されていません</p></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3</span>調剤技術料への加算（該当するもののみ）</h2>
+      <div id="tekiyoOpts"></div>
+      <div class="pending" id="jikaNaifukuBox" style="display:none;">
+        <div class="drugname">自家製剤加算（内服）の点数計算</div>
+        <p class="note" style="margin-bottom:8px;">内服の自家製剤加算は他と計算方法が異なり、7日分につき20点（錠剤分割は4点）で算定します。</p>
+        <div class="fieldline">
+          <label>算定日数<input type="number" id="jikaDays" min="1" value="7" style="width:80px;"></label>
+          <label class="opt" style="margin-top:16px;"><input type="checkbox" id="jikaTablet"> 錠剤の分割（4点/7日）</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">4</span>薬学管理料（該当するもののみ）</h2>
+      <div class="grid" id="kanriOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">5</span>時間外等加算（該当する場合のみ）</h2>
+      <p class="note">基礎額＝調剤基本料＋薬剤調製料＋無菌製剤処理加算＋調剤管理料 に対する加算です。</p>
+      <div class="grid" id="jikangaiOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">6</span>患者負担割合</h2>
+      <div class="grid" id="futanOpts"></div>
+    </div>
+
+    <div class="flexbtns">
+      <button class="btn" onclick="showTab('result')">③ 結果を見る →</button>
+      <button class="btn ghost" onclick="resetPrescription()">この処方をクリア</button>
+    </div>
+  </section>
+
+  <!-- ============ TAB 3: 結果 ============ -->
+  <section id="tab-result" class="panel">
+    <div class="card">
+      <h2><span class="num">✓</span>点数内訳</h2>
+      <table class="breakdown" id="breakdownTbl"></table>
+    </div>
+
+    <div class="totalbox">
+      <div class="lbl">総点数</div>
+      <div class="big" id="totalPointsOut">0 点</div>
+      <div class="lbl" style="margin-top:14px;">お会計金額（患者負担）</div>
+      <div class="big" id="totalYenOut">0 円</div>
+    </div>
+
+    <div class="flexbtns">
+      <button class="btn ghost" onclick="showTab('prescribe')">← 処方入力に戻る</button>
+      <button class="btn" onclick="printResult()">印刷 / PDF保存</button>
+    </div>
+
+    <p class="note" style="margin-top:14px;">
+      ※本ツールは概算計算を補助するものです。自家製剤加算の一部、複雑な混合剤、月内算定回数の制限などは反映しきれない場合があります。実際のレセプト請求前に必ず算定要件をご確認ください。
+    </p>
+  </section>
+
+</main>
+
+<footer>DX薬剤師えむ｜yakkyokudx.com — 個人利用・院内確認用ツールです。公式なレセプト請求システムではありません。</footer>
+
+<script src="drugs.js"></script>
+<script>
+/* ==========================================================
+   薬局レセコン電卓 - 2026年6月改定対応
+   ========================================================== */
+
+// ---------- マスタデータ定義 ----------
+const KIHONRYO = [
+  {id:'k1', label:'調剤基本料1', pt:47},
+  {id:'k2', label:'調剤基本料2', pt:30},
+  {id:'k3a', label:'調剤基本料3（イ）', pt:25},
+  {id:'k3b', label:'調剤基本料3（ロ）', pt:20},
+  {id:'k3c', label:'調剤基本料3（ハ）', pt:37},
+  {id:'ktA', label:'特別調剤基本料A', pt:5},
+  {id:'ktB', label:'特別調剤基本料B', pt:3},
+];
+const CHIIKI = [
+  {id:'none', label:'なし', pt:0},
+  {id:'c1', label:'地域支援体制加算1', pt:27},
+  {id:'c2', label:'地域支援体制加算2', pt:59},
+  {id:'c3', label:'地域支援体制加算3', pt:67},
+  {id:'c4', label:'地域支援体制加算4', pt:37},
+  {id:'c5', label:'医薬品供給体制加算', pt:59},
+];
+const SONOTA = [
+  {id:'renkei', label:'連携強化加算', pt:5},
+  {id:'kohatsu', label:'後発医薬品調剤体制減算', pt:-5},
+  {id:'denshi', label:'電子的調剤情報連携体制整備加算', pt:8},
+  {id:'monzen', label:'門前薬局等立地依存減算', pt:-15},
+  {id:'base_up', label:'ベースアップ評価料', pt:4},
+];
+const JIKANGAI = [
+  {id:'none', label:'なし', type:'none'},
+  {id:'jikangai', label:'時間外加算（基礎額×100％）', type:'pct', rate:1.0},
+  {id:'kyujitu', label:'休日加算（基礎額×140％）', type:'pct', rate:1.4},
+  {id:'shinya', label:'深夜加算（基礎額×200％）', type:'pct', rate:2.0},
+  {id:'yakan', label:'夜間・休日等加算（一律）', type:'flat', pt:40},
+];
+const FUTAN = [
+  {id:'0', label:'０割（自己負担なし）', ratio:0},
+  {id:'1', label:'１割', ratio:0.1},
+  {id:'2', label:'２割', ratio:0.2},
+  {id:'3', label:'３割', ratio:0.3},
+  {id:'10', label:'10割（自費）', ratio:1.0},
+];
+const KANRI = [
+  {id:'m1', label:'服薬管理指導料（3ヶ月以内・手帳あり）', pt:45},
+  {id:'m2', label:'服薬管理指導料（上記以外）', pt:59},
+  {id:'m3', label:'麻薬管理指導加算', pt:22},
+  {id:'m4', label:'特定薬剤管理指導加算1（新規）', pt:10},
+  {id:'m5', label:'特定薬剤管理指導加算1（指導の必要）', pt:5},
+  {id:'m6', label:'特定薬剤管理指導加算2', pt:100},
+  {id:'m7', label:'特定薬剤管理指導加算3（RMP）', pt:5},
+  {id:'m8', label:'特定薬剤管理指導加算3（選定・供給）', pt:10},
+  {id:'m9', label:'乳幼児服薬指導加算', pt:12},
+  {id:'m10', label:'小児特定加算', pt:350},
+  {id:'m11', label:'吸入薬指導加算', pt:30},
+  {id:'m12', label:'かかりつけ薬剤師指導料フォローアップ', pt:50},
+  {id:'m13', label:'かかりつけ薬剤師訪問指導料', pt:230},
+  {id:'m14', label:'外来服薬支援料1', pt:185},
+  {id:'m15', label:'外来服薬支援料2（7日分以下）', pt:34},
+  {id:'m16', label:'外来服薬支援料2（43日分以上）', pt:240},
+  {id:'m17', label:'服用薬剤調製支援料1', pt:125},
+  {id:'m18', label:'服用薬剤調製支援料2', pt:1000},
+  {id:'m19', label:'調剤後薬剤管理指導料', pt:60},
+  {id:'m20', label:'服薬情報等提供料1', pt:30},
+  {id:'m21', label:'服薬情報等提供料2', pt:20},
+  {id:'m22', label:'服薬情報等提供料3', pt:50},
+];
+// 加算（数量入力式：チェック＋数量で pt×数量）
+const TEKIYO = [
+  {id:'t1', label:'無菌製剤処理加算（中心静脈栄養）', pt:69, qty:false},
+  {id:'t2', label:'無菌製剤処理加算（抗がん剤）', pt:79, qty:false},
+  {id:'t3', label:'無菌製剤処理加算（麻薬）', pt:69, qty:false},
+  {id:'t4', label:'麻薬等加算', pt:70, qty:false},
+  {id:'t5', label:'麻薬等加算（向精神・覚醒剤原料・毒薬）', pt:8, qty:false},
+  {id:'t6', label:'自家製剤加算（頓服・液剤以外）', pt:90, qty:false},
+  {id:'t7', label:'自家製剤加算（頓服・液剤）', pt:45, qty:false},
+  {id:'t8', label:'自家製剤加算（錠剤・坐剤）', pt:90, qty:false},
+  {id:'t9', label:'自家製剤加算（点眼・点鼻・点耳・浣腸）', pt:75, qty:false},
+  {id:'t10', label:'自家製剤加算（液剤／内服・外用）', pt:45, qty:false},
+  {id:'t11', label:'計量混合調剤加算（液剤）', pt:35, qty:false},
+  {id:'t12', label:'計量混合調剤加算（散剤）', pt:45, qty:false},
+  {id:'t13', label:'計量混合調剤加算（軟膏）', pt:80, qty:false},
+  {id:'jika_naifuku', label:'自家製剤加算（内服）※計算方法が異なります', pt:0, special:'jika_naifuku'},
+];
+
+// 内服 用法（1日回数→タイミング候補）
+const NAIFUKU_FREQ = {
+  '1日1回': ['朝食前','朝食後','朝食直後','昼食前','昼食後','昼食直後','夕食前','夕食後','夕食直後','就寝前','空腹時','フリー入力'],
+  '1日2回': ['朝・夕食後','フリー入力'],
+  '1日3回': ['毎食後','毎食前','毎食直前','毎食直後','毎食間','フリー入力'],
+  '1日4回': ['毎食後・就寝前','フリー入力'],
+  '1日〇回': ['フリー入力'],
+  '頓服': ['フリー入力'],
+};
+const GAIYOU_FREQ = ['1日1回','1日2回','1日3回','1日1～2回','1日2～3回','1日〇回','フリー入力'];
+const CHUSHA_FREQ = ['1日1回','1日2回','1日3回','1日〇回','フリー入力'];
+
+// ---------- 状態管理 ----------
+const LS_SETTINGS = 'recepc_settings_v1';
+const state = {
+  settings: loadSettings(),
+  currentCat: 'naifuku',
+  pendingDrug: null,
+  items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
+  tekiyoChecked: {}, // id -> true
+  jikaNaifuku: null, // {days, tablet}
+  kanriChecked: {},
+  jikangai: 'none',
+  futan: '3',
+};
+
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem(LS_SETTINGS);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return {kihonryo:'k1', chiiki:'none', sonota:{}};
+}
+function saveSettings(){
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
+}
+
+// ---------- タブ切替 ----------
+function showTab(name){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(name==='result') renderResult();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.querySelectorAll('nav.tabs button').forEach(b=>{
+  b.addEventListener('click', ()=>showTab(b.dataset.tab));
+});
+
+// ---------- 設定タブ描画 ----------
+function renderSettingsTab(){
+  const kw = document.getElementById('kihonryoOpts');
+  kw.innerHTML = KIHONRYO.map(o=>`
+    <label class="opt"><input type="radio" name="kihonryo" value="${o.id}" ${state.settings.kihonryo===o.id?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>
+  `).join('');
+  kw.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+    state.settings.kihonryo = e.target.value; saveSettings();
+  }));
+
+  const cw = document.getElementById('chiikiOpts');
+  cw.innerHTML = CHIIKI.map(o=>`
+    <label class="opt"><input type="radio" name="chiiki" value="${o.id}" ${state.settings.chiiki===o.id?'checked':''}>${o.label}<span class="pt">${o.pt?o.pt+'点':''}</span></label>
+  `).join('');
+  cw.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+    state.settings.chiiki = e.target.value; saveSettings();
+  }));
+
+  const sw = document.getElementById('sonotaOpts');
+  sw.innerHTML = SONOTA.map(o=>`
+    <label class="opt"><input type="checkbox" data-id="${o.id}" ${state.settings.sonota[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt>0?'+':''}${o.pt}点</span></label>
+  `).join('');
+  sw.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+    state.settings.sonota[e.target.dataset.id] = e.target.checked; saveSettings();
+  }));
+}
+
+// ---------- 加算・管理料・時間外・負担割 描画 ----------
+function renderTekiyoOpts(){
+  const el = document.getElementById('tekiyoOpts');
+  el.innerHTML = '<div class="grid">' + TEKIYO.map(o=>{
+    if(o.special) return '';
+    return `<label class="opt"><input type="checkbox" data-id="${o.id}" ${state.tekiyoChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>`;
+  }).join('') + `<label class="opt"><input type="checkbox" id="jikaNaifukuChk" ${state.jikaNaifuku?'checked':''}>自家製剤加算（内服）<span class="pt badge">計算式別</span></label>` + '</div>';
+
+  el.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
+    state.tekiyoChecked[e.target.dataset.id] = e.target.checked;
+    renderItemList();
+  }));
+  document.getElementById('jikaNaifukuChk').addEventListener('change', e=>{
+    const box = document.getElementById('jikaNaifukuBox');
+    if(e.target.checked){
+      box.style.display='block';
+      state.jikaNaifuku = {days: Number(document.getElementById('jikaDays').value)||7, tablet:document.getElementById('jikaTablet').checked};
+    }else{
+      box.style.display='none';
+      state.jikaNaifuku = null;
+    }
+    renderItemList();
+  });
+  document.getElementById('jikaDays').addEventListener('input', e=>{
+    if(state.jikaNaifuku) state.jikaNaifuku.days = Number(e.target.value)||1;
+  });
+  document.getElementById('jikaTablet').addEventListener('change', e=>{
+    if(state.jikaNaifuku) state.jikaNaifuku.tablet = e.target.checked;
+  });
+}
+
+function renderKanriOpts(){
+  const el = document.getElementById('kanriOpts');
+  el.innerHTML = KANRI.map(o=>`
+    <label class="opt"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>
+  `).join('');
+  el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+    state.kanriChecked[e.target.dataset.id] = e.target.checked;
+  }));
+}
+
+function renderJikangaiOpts(){
+  const el = document.getElementById('jikangaiOpts');
+  el.innerHTML = JIKANGAI.map(o=>`
+    <label class="opt"><input type="radio" name="jikangai" value="${o.id}" ${state.jikangai===o.id?'checked':''}>${o.label}</label>
+  `).join('');
+  el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{ state.jikangai = e.target.value; }));
+}
+
+function renderFutanOpts(){
+  const el = document.getElementById('futanOpts');
+  el.innerHTML = FUTAN.map(o=>`
+    <label class="opt"><input type="radio" name="futan" value="${o.id}" ${state.futan===o.id?'checked':''}>${o.label}</label>
+  `).join('');
+  el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{ state.futan = e.target.value; }));
+}
+
+// ---------- 医薬品検索 ----------
+const CAT_LABEL = {naifuku:'内服',gaiyou:'外用',chusha:'注射'};
+document.querySelectorAll('.catbtns button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.catbtns button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    state.currentCat = b.dataset.cat;
+    document.getElementById('drugSearch').value='';
+    document.getElementById('drugResults').innerHTML='';
+    state.pendingDrug=null;
+    renderPending();
+  });
+});
+
+const drugSearchInput = document.getElementById('drugSearch');
+drugSearchInput.addEventListener('input', ()=>{
+  const q = drugSearchInput.value.trim();
+  const resEl = document.getElementById('drugResults');
+  if(!q){ resEl.innerHTML=''; return; }
+  const terms = q.split(/\s+/).filter(Boolean).map(t=>t.toLowerCase());
+  const list = window.DRUG_DATA[state.currentCat] || [];
+  let results = [];
+  for(let i=0;i<list.length && results.length<40;i++){
+    const row = list[i]; // [品名,成分名,規格,薬価,メーカー,局,麻]
+    const hay = (row[0]+' '+row[1]+' '+row[2]).toLowerCase();
+    if(terms.every(t=>hay.includes(t))) results.push(row);
+  }
+  if(results.length===0){ resEl.innerHTML = '<div class="row"><span>該当する医薬品が見つかりません</span></div>'; return; }
+  resEl.innerHTML = results.map((r,idx)=>`
+    <div class="row" data-idx="${idx}">
+      <span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
+      <span class="meta">${r[3]}円${r[6]?'｜麻':''}</span>
+    </div>
+  `).join('');
+  resEl.querySelectorAll('.row[data-idx]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const r = results[Number(el.dataset.idx)];
+      selectDrug(r);
+      resEl.innerHTML='';
+      drugSearchInput.value='';
+    });
+  });
+});
+
+function selectDrug(row){
+  state.pendingDrug = {
+    name:row[0], generic:row[1], spec:row[2], price:Number(row[3])||0, cat:state.currentCat,
+    isPicos: row[0].includes('ピコスルファート') || row[1].includes('ピコスルファート'),
+  };
+  renderPending();
+}
+
+function renderPending(){
+  const el = document.getElementById('pendingArea');
+  if(!state.pendingDrug){ el.innerHTML=''; return; }
+  const d = state.pendingDrug;
+  const cat = d.cat;
+  let freqHtml='', timingHtml='';
+  if(cat==='naifuku'){
+    freqHtml = `<select id="pFreq">${Object.keys(NAIFUKU_FREQ).map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
+  } else if(cat==='gaiyou'){
+    freqHtml = `<select id="pFreq">${GAIYOU_FREQ.map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
+  } else {
+    freqHtml = `<select id="pFreq">${CHUSHA_FREQ.map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
+  }
+
+  el.innerHTML = `
+    <div class="pending">
+      <div class="drugname">${d.name} <span class="pt" style="margin-left:8px;">${d.price}円／${d.spec}</span></div>
+      <div class="fieldline">
+        <label>${cat==='naifuku'?'1日量':'総量'}<input type="number" id="pDose" min="0" step="0.01" value="1" style="width:90px;"></label>
+        <label>用法<span id="pFreqWrap">${freqHtml}</span></label>
+        ${cat==='naifuku'?'<label>服用タイミング<span id="pTimingWrap"></span></label>':''}
+        <label>日数<input type="number" id="pDays" min="1" value="7" style="width:80px;"></label>
+      </div>
+      <div class="flexbtns">
+        <button class="btn" onclick="addPendingItem()">＋ リストに追加</button>
+        <button class="btn ghost" onclick="cancelPending()">キャンセル</button>
+      </div>
+    </div>
+  `;
+  if(cat==='naifuku'){
+    const freqSel = document.getElementById('pFreq');
+    const renderTiming = ()=>{
+      const opts = NAIFUKU_FREQ[freqSel.value];
+      document.getElementById('pTimingWrap').innerHTML = `<select id="pTiming">${opts.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>`;
+    };
+    freqSel.addEventListener('change', renderTiming);
+    renderTiming();
+  }
+}
+
+function cancelPending(){ state.pendingDrug=null; renderPending(); }
+
+function addPendingItem(){
+  const d = state.pendingDrug;
+  if(!d) return;
+  const dose = Number(document.getElementById('pDose').value)||0;
+  const days = Number(document.getElementById('pDays').value)||1;
+  const freq = document.getElementById('pFreq').value;
+  const timing = d.cat==='naifuku' ? document.getElementById('pTiming').value : '';
+  state.items.push({
+    id: 'it'+Date.now()+Math.random().toString(36).slice(2,7),
+    cat:d.cat, name:d.name, price:d.price, dailyDose:dose, freq, timing, days,
+    isPicos:d.isPicos,
+  });
+  state.pendingDrug=null;
+  renderPending();
+  renderItemList();
+}
+
+function removeItem(id){
+  state.items = state.items.filter(i=>i.id!==id);
+  renderItemList();
+}
+
+function renderItemList(){
+  const wrap = document.getElementById('itemListWrap');
+  if(state.items.length===0){ wrap.innerHTML='<p class="empty">まだ医薬品が追加されていません</p>'; return; }
+  wrap.innerHTML = `<table class="itemtbl"><thead><tr>
+    <th>区分</th><th>薬品名</th><th>用法</th><th>量／日数</th><th></th>
+  </tr></thead><tbody>
+  ${state.items.map(i=>`
+    <tr>
+      <td class="small">${CAT_LABEL[i.cat]}</td>
+      <td class="name">${i.name}${i.isPicos?'<span class="badge">ピコス</span>':''}</td>
+      <td class="small">${i.freq}${i.timing?'／'+i.timing:''}</td>
+      <td class="small">${i.dailyDose}${i.cat==='naifuku'?'／日':'（総量）'}・${i.days}日分</td>
+      <td><button class="rowdel" onclick="removeItem('${i.id}')">✕</button></td>
+    </tr>
+  `).join('')}
+  </tbody></table>`;
+}
+
+// ---------- 計算ロジック ----------
+function yenToPoints(yenTotal){
+  if(yenTotal<=0) return 0;
+  if(yenTotal<=15) return 1;
+  const raw = yenTotal/10;
+  const floor = Math.floor(raw);
+  const frac = raw-floor;
+  return frac>0.5 ? Math.ceil(raw) : floor;
+}
+
+function calcAll(){
+  const items = state.items;
+  const naifuku = items.filter(i=>i.cat==='naifuku');
+  const gaiyou = items.filter(i=>i.cat==='gaiyou');
+  const chusha = items.filter(i=>i.cat==='chusha');
+
+  // ---- 薬剤料 ----
+  // 内服：同一（用法＋タイミング＋日数）でグループ化し、1日薬価合計を丸めてから日数を掛ける
+  let naifukuYaku = 0;
+  {
+    const groups = {};
+    naifuku.forEach(i=>{
+      const key = i.freq+'|'+i.timing+'|'+i.days;
+      if(!groups[key]) groups[key] = {yenPerDay:0, days:i.days};
+      groups[key].yenPerDay += i.price*i.dailyDose;
+    });
+    Object.values(groups).forEach(g=>{
+      naifukuYaku += yenToPoints(g.yenPerDay)*g.days;
+    });
+  }
+  // 外用・注射：総量×薬価をカテゴリ内で合算し、1回だけ丸める
+  const gaiyouYen = gaiyou.reduce((s,i)=>s+i.price*i.dailyDose,0);
+  const gaiyouYaku = yenToPoints(gaiyouYen);
+  const chushaYen = chusha.reduce((s,i)=>s+i.price*i.dailyDose,0);
+  const chushaYaku = yenToPoints(chushaYen);
+  const yakuzaiTotal = naifukuYaku+gaiyouYaku+chushaYaku;
+
+  // ---- 薬剤調製料 ----
+  let chouseiTotal = 0;
+  const naifukuNormal = naifuku.filter(i=>i.freq!=='頓服' && !i.isPicos);
+  const naifukuTonpuku = naifuku.filter(i=>i.freq==='頓服' && !i.isPicos);
+  const naifukuPicos = naifuku.filter(i=>i.isPicos);
+  const freqTypes = [...new Set(naifukuNormal.map(i=>i.freq))].slice(0,3);
+  chouseiTotal += freqTypes.length*24;
+  if(naifukuTonpuku.length>0) chouseiTotal += 21;
+  chouseiTotal += naifukuPicos.length*10;
+
+  const gaiyouDrugTypes = [...new Set(gaiyou.map(i=>i.name))].slice(0,3);
+  chouseiTotal += gaiyouDrugTypes.length*10;
+
+  if(chusha.length>0) chouseiTotal += 26;
+
+  // ---- 調剤管理料 ----
+  let kanriBase = 0;
+  if(naifuku.length>0){
+    const groups = {};
+    naifuku.forEach(i=>{
+      const key = i.freq+'|'+i.timing+'|'+i.days;
+      if(!(key in groups)) groups[key] = i.days;
+    });
+    const keys = Object.keys(groups).slice(0,3);
+    keys.forEach(k=>{ kanriBase += groups[k]>=28 ? 60 : 10; });
+  } else if(gaiyou.length>0 || chusha.length>0){
+    const names = [...new Set([...gaiyou,...chusha].map(i=>i.name))].slice(0,3);
+    kanriBase += names.length*10;
+  }
+
+  // ---- 加算（無菌製剤・麻薬等・自家製剤・計量混合） ----
+  let tekiyoTotal = 0;
+  TEKIYO.forEach(o=>{
+    if(o.special) return;
+    if(state.tekiyoChecked[o.id]) tekiyoTotal += o.pt;
+  });
+  let jikaNaifukuPt = 0;
+  if(state.jikaNaifuku){
+    const unit = state.jikaNaifuku.tablet ? 4 : 20;
+    jikaNaifukuPt = Math.ceil(state.jikaNaifuku.days/7)*unit;
+    tekiyoTotal += jikaNaifukuPt;
+  }
+
+  // ---- 薬学管理料 ----
+  let kanriGakuTotal = 0;
+  KANRI.forEach(o=>{ if(state.kanriChecked[o.id]) kanriGakuTotal += o.pt; });
+
+  // ---- 基本料関連 ----
+  const kihonryoObj = KIHONRYO.find(o=>o.id===state.settings.kihonryo) || {pt:0};
+  const chiikiObj = CHIIKI.find(o=>o.id===state.settings.chiiki) || {pt:0};
+  let sonotaTotal = 0;
+  SONOTA.forEach(o=>{ if(state.settings.sonota[o.id]) sonotaTotal += o.pt; });
+
+  const kihonTotal = kihonryoObj.pt + chiikiObj.pt + sonotaTotal;
+
+  // ---- 時間外等加算 ----
+  const kiso = kihonTotal + chouseiTotal + kanriBase; // 基礎額（無菌製剤加算等の細部は簡略化）
+  const jikangaiObj = JIKANGAI.find(o=>o.id===state.jikangai);
+  let jikangaiPt = 0;
+  if(jikangaiObj && jikangaiObj.type==='pct'){
+    jikangaiPt = Math.round(kiso*jikangaiObj.rate);
+  } else if(jikangaiObj && jikangaiObj.type==='flat'){
+    jikangaiPt = jikangaiObj.pt;
+  }
+
+  const grandTotal = kihonTotal + chouseiTotal + yakuzaiTotal + kanriBase + tekiyoTotal + kanriGakuTotal + jikangaiPt;
+
+  const futanObj = FUTAN.find(o=>o.id===state.futan) || {ratio:0};
+  const yenBeforeRatio = grandTotal*10;
+  let payment = yenBeforeRatio*futanObj.ratio;
+  payment = Math.round(payment/10)*10; // 10円未満四捨五入
+
+  return {
+    kihonryoObj, chiikiObj, sonotaTotal, kihonTotal,
+    naifukuYaku, gaiyouYaku, chushaYaku, yakuzaiTotal,
+    freqTypesCount:freqTypes.length, tonpuku:naifukuTonpuku.length>0, picosCount:naifukuPicos.length,
+    gaiyouDrugTypesCount:gaiyouDrugTypes.length, chushaPresent:chusha.length>0,
+    chouseiTotal, kanriBase, tekiyoTotal, jikaNaifukuPt, kanriGakuTotal,
+    jikangaiPt, jikangaiObj, grandTotal, futanObj, payment, yenBeforeRatio,
+  };
+}
+
+function renderResult(){
+  const r = calcAll();
+  const tbl = document.getElementById('breakdownTbl');
+  const rows = [];
+  rows.push(['調剤基本料｜'+r.kihonryoObj.label, r.kihonryoObj.pt]);
+  if(r.chiikiObj.pt) rows.push(['｜'+r.chiikiObj.label, r.chiikiObj.pt]);
+  if(r.sonotaTotal) rows.push(['｜その他基本料加算', r.sonotaTotal]);
+  rows.push(['薬剤調製料（内服型'+r.freqTypesCount+'種'+(r.tonpuku?'＋頓服':'')+(r.picosCount?'＋ピコス'+r.picosCount:'')+'／外用'+r.gaiyouDrugTypesCount+'種／注射'+(r.chushaPresent?'あり':'なし')+'）', r.chouseiTotal]);
+  rows.push(['薬剤料（内服'+r.naifukuYaku+'点＋外用'+r.gaiyouYaku+'点＋注射'+r.chushaYaku+'点）', r.yakuzaiTotal]);
+  rows.push(['調剤管理料', r.kanriBase]);
+  if(r.tekiyoTotal) rows.push(['加算（無菌製剤・麻薬等・自家製剤・計量混合等）', r.tekiyoTotal]);
+  if(r.kanriGakuTotal) rows.push(['薬学管理料', r.kanriGakuTotal]);
+  if(r.jikangaiPt) rows.push([r.jikangaiObj.label, r.jikangaiPt]);
+
+  tbl.innerHTML = rows.map(([label,pt])=>`<tr><td>${label}</td><td>${pt.toLocaleString()}点</td></tr>`).join('')
+    + `<tr class="total"><td>総点数</td><td>${r.grandTotal.toLocaleString()}点</td></tr>`;
+
+  document.getElementById('totalPointsOut').textContent = r.grandTotal.toLocaleString()+' 点';
+  document.getElementById('totalYenOut').textContent = r.payment.toLocaleString()+' 円　'+`（${r.futanObj.label}）`;
+}
+
+function resetPrescription(){
+  if(!confirm('現在の処方入力内容をすべてクリアします。よろしいですか？')) return;
+  state.items = [];
+  state.pendingDrug=null;
+  state.tekiyoChecked = {};
+  state.jikaNaifuku = null;
+  state.kanriChecked = {};
+  state.jikangai='none';
+  renderItemList();
+  renderPending();
+  renderTekiyoOpts();
+  renderKanriOpts();
+  renderJikangaiOpts();
+  document.getElementById('jikaNaifukuBox').style.display='none';
+}
+
+function printResult(){ window.print(); }
+
+// ---------- 初期化 ----------
+renderSettingsTab();
+renderTekiyoOpts();
+renderKanriOpts();
+renderJikangaiOpts();
+renderFutanOpts();
+renderItemList();
+</script>
+</body>
+</html>
