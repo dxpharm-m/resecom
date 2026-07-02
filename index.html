@@ -268,6 +268,26 @@
     margin-bottom:12px;
   }
   .empty{color:var(--ink-soft);font-size:.82rem;padding:14px 4px;text-align:center;}
+  .detailgrp{margin-bottom:10px;}
+  .detailgrp summary{
+    cursor:pointer;
+    font-size:.84rem;
+    font-weight:600;
+    color:var(--navy);
+    padding:6px 0;
+  }
+  .detailgrp .formula{
+    font-size:.78rem;
+    color:var(--ink-soft);
+    background:#f8f7f2;
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:8px 10px;
+    margin:4px 0;
+    line-height:1.6;
+    font-variant-numeric:tabular-nums;
+  }
+  .editbtn{background:none;border:none;color:var(--teal);cursor:pointer;font-size:.95rem;}
   .flexbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
   footer{
     text-align:center;
@@ -314,6 +334,10 @@
     <div class="card">
       <p class="note" style="margin:0;">設定は自動保存されます。「② 処方入力」タブへ進んでください。</p>
     </div>
+
+    <div class="flexbtns">
+      <button class="btn" onclick="showTab('prescribe')">② 処方入力へ進む →</button>
+    </div>
   </section>
 
   <!-- ============ TAB 2: 処方入力 ============ -->
@@ -321,7 +345,7 @@
 
     <div class="card">
       <h2><span class="num">1</span>医薬品を検索して追加</h2>
-      <p class="note">薬品名・成分名の一部（かな／カナ／英数字）で検索できます。複数ワードはスペース区切り。</p>
+      <p class="note">薬品名・成分名の一部（ひらがな／カタカナ／英数字）で検索できます。ひらがなで入力してもカタカナ表記の薬品名にヒットします。複数ワードはスペース区切り。</p>
       <div class="catbtns">
         <button data-cat="naifuku" class="active">内服</button>
         <button data-cat="gaiyou">外用</button>
@@ -337,6 +361,7 @@
 
     <div class="card">
       <h2><span class="num">2</span>追加済みの処方リスト</h2>
+      <p class="note">✎で内容を修正、✕で削除できます。</p>
       <div id="itemListWrap"><p class="empty">まだ医薬品が追加されていません</p></div>
     </div>
 
@@ -365,11 +390,18 @@
     </div>
 
     <div class="card">
-      <h2><span class="num">6</span>患者負担割合</h2>
+      <h2><span class="num">6</span>調剤物価対応料</h2>
+      <p class="note">全処方箋に自動算定される加算です。令和9年6月1日（2027年6月1日）以降は2点に改定されます。</p>
+      <div class="grid" id="bukkaOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">7</span>患者負担割合</h2>
       <div class="grid" id="futanOpts"></div>
     </div>
 
     <div class="flexbtns">
+      <button class="btn ghost" onclick="showTab('settings')">← ① 基本料設定に戻る</button>
       <button class="btn" onclick="showTab('result')">③ 結果を見る →</button>
       <button class="btn ghost" onclick="resetPrescription()">この処方をクリア</button>
     </div>
@@ -382,6 +414,11 @@
       <table class="breakdown" id="breakdownTbl"></table>
     </div>
 
+    <div class="card">
+      <h2><span class="num">🔍</span>計算式の詳細</h2>
+      <div id="detailArea"></div>
+    </div>
+
     <div class="totalbox">
       <div class="lbl">総点数</div>
       <div class="big" id="totalPointsOut">0 点</div>
@@ -392,6 +429,7 @@
     <div class="flexbtns">
       <button class="btn ghost" onclick="showTab('prescribe')">← 処方入力に戻る</button>
       <button class="btn" onclick="printResult()">印刷 / PDF保存</button>
+      <button class="btn danger" onclick="startNewPrescription()">🆕 新しく処方入力を始める</button>
     </div>
 
     <p class="note" style="margin-top:14px;">
@@ -441,6 +479,15 @@ const JIKANGAI = [
   {id:'shinya', label:'深夜加算（基礎額×200％）', type:'pct', rate:2.0},
   {id:'yakan', label:'夜間・休日等加算（一律）', type:'flat', pt:40},
 ];
+function bukkaPoints(){
+  const cutoff = new Date(2027,5,1); // 令和9(2027)年6月1日
+  return new Date() >= cutoff ? 2 : 1;
+}
+const FREE_LABELS = ['フリー入力','1日〇回','※フリー入力','※外用フリー入力'];
+function isFreeLabel(v){ return FREE_LABELS.includes(v); }
+function hiraToKana(s){
+  return s.replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0)+0x60));
+}
 const FUTAN = [
   {id:'0', label:'０割（自己負担なし）', ratio:0},
   {id:'1', label:'１割', ratio:0.1},
@@ -509,10 +556,12 @@ const state = {
   currentCat: 'naifuku',
   pendingDrug: null,
   items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
+  editingId: null,
   tekiyoChecked: {}, // id -> true
   jikaNaifuku: null, // {days, tablet}
   kanriChecked: {},
   jikangai: 'none',
+  bukkaEnabled: true,
   futan: '3',
 };
 
@@ -615,6 +664,12 @@ function renderJikangaiOpts(){
   el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{ state.jikangai = e.target.value; }));
 }
 
+function renderBukkaOpts(){
+  const el = document.getElementById('bukkaOpts');
+  const pt = bukkaPoints();
+  el.innerHTML = `<label class="opt"><input type="checkbox" id="bukkaChk" ${state.bukkaEnabled?'checked':''}>調剤物価対応料を算定する<span class="pt">${pt}点（自動判定）</span></label>`;
+  document.getElementById('bukkaChk').addEventListener('change', e=>{ state.bukkaEnabled = e.target.checked; });
+}
 function renderFutanOpts(){
   const el = document.getElementById('futanOpts');
   el.innerHTML = FUTAN.map(o=>`
@@ -642,12 +697,12 @@ drugSearchInput.addEventListener('input', ()=>{
   const q = drugSearchInput.value.trim();
   const resEl = document.getElementById('drugResults');
   if(!q){ resEl.innerHTML=''; return; }
-  const terms = q.split(/\s+/).filter(Boolean).map(t=>t.toLowerCase());
+  const terms = q.split(/\s+/).filter(Boolean).map(t=>hiraToKana(t.toLowerCase()));
   const list = window.DRUG_DATA[state.currentCat] || [];
   let results = [];
   for(let i=0;i<list.length && results.length<40;i++){
     const row = list[i]; // [品名,成分名,規格,薬価,メーカー,局,麻]
-    const hay = (row[0]+' '+row[1]+' '+row[2]).toLowerCase();
+    const hay = hiraToKana((row[0]+' '+row[1]+' '+row[2]).toLowerCase());
     if(terms.every(t=>hay.includes(t))) results.push(row);
   }
   if(results.length===0){ resEl.innerHTML = '<div class="row"><span>該当する医薬品が見つかりません</span></div>'; return; }
@@ -668,6 +723,7 @@ drugSearchInput.addEventListener('input', ()=>{
 });
 
 function selectDrug(row){
+  state.editingId = null;
   state.pendingDrug = {
     name:row[0], generic:row[1], spec:row[2], price:Number(row[3])||0, cat:state.currentCat,
     isPicos: row[0].includes('ピコスルファート') || row[1].includes('ピコスルファート'),
@@ -675,61 +731,132 @@ function selectDrug(row){
   renderPending();
 }
 
+function editItem(id){
+  const item = state.items.find(i=>i.id===id);
+  if(!item) return;
+  state.editingId = id;
+  state.pendingDrug = {
+    name:item.name, generic:'', spec:'', price:item.price, cat:item.cat, isPicos:item.isPicos,
+    prefill:{dailyDose:item.dailyDose, freq:item.freq, timing:item.timing, days:item.days},
+  };
+  renderPending();
+  const pendEl = document.getElementById('pendingArea');
+  if(pendEl && typeof pendEl.scrollIntoView === 'function'){
+    pendEl.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+
+function freqOptionsFor(cat){
+  if(cat==='naifuku') return Object.keys(NAIFUKU_FREQ);
+  if(cat==='gaiyou') return GAIYOU_FREQ;
+  return CHUSHA_FREQ;
+}
+
 function renderPending(){
   const el = document.getElementById('pendingArea');
   if(!state.pendingDrug){ el.innerHTML=''; return; }
   const d = state.pendingDrug;
   const cat = d.cat;
-  let freqHtml='', timingHtml='';
-  if(cat==='naifuku'){
-    freqHtml = `<select id="pFreq">${Object.keys(NAIFUKU_FREQ).map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
-  } else if(cat==='gaiyou'){
-    freqHtml = `<select id="pFreq">${GAIYOU_FREQ.map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
-  } else {
-    freqHtml = `<select id="pFreq">${CHUSHA_FREQ.map(f=>`<option value="${f}">${f}</option>`).join('')}</select>`;
-  }
+  const pre = d.prefill || {};
+  const isEditing = !!state.editingId;
+  const freqOpts = freqOptionsFor(cat);
+  const preFreqInList = pre.freq && freqOpts.includes(pre.freq);
+  const freqHtml = `<select id="pFreq">${freqOpts.map(f=>`<option value="${f}" ${pre.freq===f?'selected':''}>${f}</option>`).join('')}</select>`;
 
   el.innerHTML = `
     <div class="pending">
-      <div class="drugname">${d.name} <span class="pt" style="margin-left:8px;">${d.price}円／${d.spec}</span></div>
+      <div class="drugname">${isEditing?'✎ 編集：':''}${d.name} <span class="pt" style="margin-left:8px;">${d.price}円${d.spec?'／'+d.spec:''}</span></div>
       <div class="fieldline">
-        <label>${cat==='naifuku'?'1日量':'総量'}<input type="number" id="pDose" min="0" step="0.01" value="1" style="width:90px;"></label>
+        <label>${cat==='naifuku'?'1日量':'総量'}<input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" style="width:90px;"></label>
         <label>用法<span id="pFreqWrap">${freqHtml}</span></label>
-        ${cat==='naifuku'?'<label>服用タイミング<span id="pTimingWrap"></span></label>':''}
-        <label>日数<input type="number" id="pDays" min="1" value="7" style="width:80px;"></label>
+        <span id="pFreqCustomWrap"></span>
+        ${cat==='naifuku'?'<label>服用タイミング<span id="pTimingWrap"></span></label><span id="pTimingCustomWrap"></span>':''}
+        ${cat==='naifuku'?`<label>日数<input type="number" id="pDays" min="1" value="${pre.days!=null?pre.days:7}" style="width:80px;"></label>`:''}
       </div>
       <div class="flexbtns">
-        <button class="btn" onclick="addPendingItem()">＋ リストに追加</button>
+        <button class="btn" onclick="addPendingItem()">${isEditing?'💾 変更を保存':'＋ リストに追加'}</button>
         <button class="btn ghost" onclick="cancelPending()">キャンセル</button>
       </div>
     </div>
   `;
+
+  const freqSel = document.getElementById('pFreq');
+  // 編集時、保存済みの用法が選択肢にない自由記入だった場合は「1日〇回／フリー入力」を自動選択
+  if(!preFreqInList && pre.freq){
+    const freeDefault = cat==='naifuku' ? '1日〇回' : 'フリー入力';
+    if(freqOpts.includes(freeDefault)) freqSel.value = freeDefault;
+  }
+  const renderFreqCustom = ()=>{
+    const wrap = document.getElementById('pFreqCustomWrap');
+    if(isFreeLabel(freqSel.value)){
+      const preVal = (!preFreqInList && pre.freq) ? pre.freq : '';
+      wrap.innerHTML = `<label>用法（自由記入）<input type="text" id="pFreqCustom" placeholder="例：1日5回／症状時など" value="${preVal.replace(/"/g,'&quot;')}" style="width:170px;"></label>`;
+    } else {
+      wrap.innerHTML = '';
+    }
+  };
+  freqSel.addEventListener('change', ()=>{ renderFreqCustom(); if(cat==='naifuku') renderTiming(); });
+
+  let renderTiming = ()=>{};
   if(cat==='naifuku'){
-    const freqSel = document.getElementById('pFreq');
-    const renderTiming = ()=>{
-      const opts = NAIFUKU_FREQ[freqSel.value];
-      document.getElementById('pTimingWrap').innerHTML = `<select id="pTiming">${opts.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>`;
+    renderTiming = ()=>{
+      const opts = NAIFUKU_FREQ[freqSel.value] || NAIFUKU_FREQ['1日〇回'];
+      const preTimingInList = pre.timing && opts.includes(pre.timing);
+      document.getElementById('pTimingWrap').innerHTML = `<select id="pTiming">${opts.map(t=>`<option value="${t}" ${pre.timing===t?'selected':''}>${t}</option>`).join('')}</select>`;
+      const timingSel = document.getElementById('pTiming');
+      if(!preTimingInList && pre.timing && opts.includes('フリー入力')) timingSel.value = 'フリー入力';
+      const renderTimingCustom = ()=>{
+        const wrap = document.getElementById('pTimingCustomWrap');
+        if(isFreeLabel(timingSel.value)){
+          const preVal = (!preTimingInList && pre.timing) ? pre.timing : '';
+          wrap.innerHTML = `<label>タイミング（自由記入）<input type="text" id="pTimingCustom" placeholder="例：起床時など" value="${preVal.replace(/"/g,'&quot;')}" style="width:150px;"></label>`;
+        } else {
+          wrap.innerHTML = '';
+        }
+      };
+      timingSel.addEventListener('change', renderTimingCustom);
+      renderTimingCustom();
     };
-    freqSel.addEventListener('change', renderTiming);
     renderTiming();
   }
+  renderFreqCustom();
 }
 
-function cancelPending(){ state.pendingDrug=null; renderPending(); }
+function readFreeValue(selectId, customId, fallback){
+  const sel = document.getElementById(selectId);
+  if(!sel) return fallback||'';
+  if(isFreeLabel(sel.value)){
+    const custom = document.getElementById(customId);
+    const v = custom ? custom.value.trim() : '';
+    return v || sel.value;
+  }
+  return sel.value;
+}
+
+function cancelPending(){ state.pendingDrug=null; state.editingId=null; renderPending(); }
 
 function addPendingItem(){
   const d = state.pendingDrug;
   if(!d) return;
   const dose = Number(document.getElementById('pDose').value)||0;
-  const days = Number(document.getElementById('pDays').value)||1;
-  const freq = document.getElementById('pFreq').value;
-  const timing = d.cat==='naifuku' ? document.getElementById('pTiming').value : '';
-  state.items.push({
-    id: 'it'+Date.now()+Math.random().toString(36).slice(2,7),
-    cat:d.cat, name:d.name, price:d.price, dailyDose:dose, freq, timing, days,
-    isPicos:d.isPicos,
-  });
+  const freq = readFreeValue('pFreq','pFreqCustom');
+  const timing = d.cat==='naifuku' ? readFreeValue('pTiming','pTimingCustom') : '';
+  const days = d.cat==='naifuku' ? (Number(document.getElementById('pDays').value)||1) : 1;
+
+  if(state.editingId){
+    const item = state.items.find(i=>i.id===state.editingId);
+    if(item){
+      item.dailyDose=dose; item.freq=freq; item.timing=timing; item.days=days;
+    }
+  } else {
+    state.items.push({
+      id: 'it'+Date.now()+Math.random().toString(36).slice(2,7),
+      cat:d.cat, name:d.name, price:d.price, dailyDose:dose, freq, timing, days,
+      isPicos:d.isPicos,
+    });
+  }
   state.pendingDrug=null;
+  state.editingId=null;
   renderPending();
   renderItemList();
 }
@@ -750,8 +877,8 @@ function renderItemList(){
       <td class="small">${CAT_LABEL[i.cat]}</td>
       <td class="name">${i.name}${i.isPicos?'<span class="badge">ピコス</span>':''}</td>
       <td class="small">${i.freq}${i.timing?'／'+i.timing:''}</td>
-      <td class="small">${i.dailyDose}${i.cat==='naifuku'?'／日':'（総量）'}・${i.days}日分</td>
-      <td><button class="rowdel" onclick="removeItem('${i.id}')">✕</button></td>
+      <td class="small">${i.dailyDose}${i.cat==='naifuku'?'／日・'+i.days+'日分':'（総量・1日分）'}</td>
+      <td><button class="editbtn" onclick="editItem('${i.id}')" title="修正">✎</button><button class="rowdel" onclick="removeItem('${i.id}')" title="削除">✕</button></td>
     </tr>
   `).join('')}
   </tbody></table>`;
@@ -772,6 +899,7 @@ function calcAll(){
   const naifuku = items.filter(i=>i.cat==='naifuku');
   const gaiyou = items.filter(i=>i.cat==='gaiyou');
   const chusha = items.filter(i=>i.cat==='chusha');
+  const detail = { yaku:[], chousei:[], kanri:[], jikangai:'', bukka:'' };
 
   // ---- 薬剤料 ----
   // 内服：同一（用法＋タイミング＋日数）でグループ化し、1日薬価合計を丸めてから日数を掛ける
@@ -780,18 +908,28 @@ function calcAll(){
     const groups = {};
     naifuku.forEach(i=>{
       const key = i.freq+'|'+i.timing+'|'+i.days;
-      if(!groups[key]) groups[key] = {yenPerDay:0, days:i.days};
+      if(!groups[key]) groups[key] = {yenPerDay:0, days:i.days, label:i.freq+(i.timing?'／'+i.timing:''), names:[]};
       groups[key].yenPerDay += i.price*i.dailyDose;
+      groups[key].names.push(i.name+'('+i.price+'円×'+i.dailyDose+')');
     });
     Object.values(groups).forEach(g=>{
-      naifukuYaku += yenToPoints(g.yenPerDay)*g.days;
+      const pt = yenToPoints(g.yenPerDay);
+      const sub = pt*g.days;
+      naifukuYaku += sub;
+      detail.yaku.push(`【内服／${g.label}・${g.days}日分】 ${g.names.join('＋')} = ${g.yenPerDay.toFixed(2)}円/日 → ${g.yenPerDay.toFixed(2)}÷10=${(g.yenPerDay/10).toFixed(2)} を五捨五超入 → ${pt}点/日 × ${g.days}日 = ${sub}点`);
     });
   }
   // 外用・注射：総量×薬価をカテゴリ内で合算し、1回だけ丸める
   const gaiyouYen = gaiyou.reduce((s,i)=>s+i.price*i.dailyDose,0);
   const gaiyouYaku = yenToPoints(gaiyouYen);
+  if(gaiyou.length>0){
+    detail.yaku.push(`【外用】 ${gaiyou.map(i=>i.name+'('+i.price+'円×'+i.dailyDose+')').join('＋')} = ${gaiyouYen.toFixed(2)}円 → ${(gaiyouYen/10).toFixed(2)} を五捨五超入 → ${gaiyouYaku}点`);
+  }
   const chushaYen = chusha.reduce((s,i)=>s+i.price*i.dailyDose,0);
   const chushaYaku = yenToPoints(chushaYen);
+  if(chusha.length>0){
+    detail.yaku.push(`【注射】 ${chusha.map(i=>i.name+'('+i.price+'円×'+i.dailyDose+')').join('＋')} = ${chushaYen.toFixed(2)}円 → ${(chushaYen/10).toFixed(2)} を五捨五超入 → ${chushaYaku}点`);
+  }
   const yakuzaiTotal = naifukuYaku+gaiyouYaku+chushaYaku;
 
   // ---- 薬剤調製料 ----
@@ -800,14 +938,29 @@ function calcAll(){
   const naifukuTonpuku = naifuku.filter(i=>i.freq==='頓服' && !i.isPicos);
   const naifukuPicos = naifuku.filter(i=>i.isPicos);
   const freqTypes = [...new Set(naifukuNormal.map(i=>i.freq))].slice(0,3);
-  chouseiTotal += freqTypes.length*24;
-  if(naifukuTonpuku.length>0) chouseiTotal += 21;
-  chouseiTotal += naifukuPicos.length*10;
+  if(freqTypes.length>0){
+    chouseiTotal += freqTypes.length*24;
+    detail.chousei.push(`内服・用法${freqTypes.length}種類（${freqTypes.join('／')}） × 24点 = ${freqTypes.length*24}点`);
+  }
+  if(naifukuTonpuku.length>0){
+    chouseiTotal += 21;
+    detail.chousei.push(`内服・頓服あり = 21点（品目数に関わらず一律）`);
+  }
+  if(naifukuPicos.length>0){
+    chouseiTotal += naifukuPicos.length*10;
+    detail.chousei.push(`ピコスルファート ${naifukuPicos.length}品目 × 10点 = ${naifukuPicos.length*10}点`);
+  }
 
   const gaiyouDrugTypes = [...new Set(gaiyou.map(i=>i.name))].slice(0,3);
-  chouseiTotal += gaiyouDrugTypes.length*10;
+  if(gaiyouDrugTypes.length>0){
+    chouseiTotal += gaiyouDrugTypes.length*10;
+    detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 × 10点 = ${gaiyouDrugTypes.length*10}点`);
+  }
 
-  if(chusha.length>0) chouseiTotal += 26;
+  if(chusha.length>0){
+    chouseiTotal += 26;
+    detail.chousei.push(`注射あり = 26点（品目数に関わらず一律）`);
+  }
 
   // ---- 調剤管理料 ----
   let kanriBase = 0;
@@ -815,37 +968,48 @@ function calcAll(){
     const groups = {};
     naifuku.forEach(i=>{
       const key = i.freq+'|'+i.timing+'|'+i.days;
-      if(!(key in groups)) groups[key] = i.days;
+      if(!(key in groups)) groups[key] = {days:i.days, label:i.freq+(i.timing?'／'+i.timing:'')};
     });
     const keys = Object.keys(groups).slice(0,3);
-    keys.forEach(k=>{ kanriBase += groups[k]>=28 ? 60 : 10; });
+    keys.forEach(k=>{
+      const g = groups[k];
+      const pt = g.days>=28 ? 60 : 10;
+      kanriBase += pt;
+      detail.kanri.push(`内服／${g.label}・${g.days}日分 → ${g.days>=28?'28日分以上':'27日分以下'} = ${pt}点`);
+    });
   } else if(gaiyou.length>0 || chusha.length>0){
     const names = [...new Set([...gaiyou,...chusha].map(i=>i.name))].slice(0,3);
     kanriBase += names.length*10;
+    if(names.length>0) detail.kanri.push(`内服なし・外用/注射${names.length}品目 × 10点 = ${names.length*10}点`);
   }
 
   // ---- 加算（無菌製剤・麻薬等・自家製剤・計量混合） ----
   let tekiyoTotal = 0;
+  const tekiyoDetail = [];
   TEKIYO.forEach(o=>{
     if(o.special) return;
-    if(state.tekiyoChecked[o.id]) tekiyoTotal += o.pt;
+    if(state.tekiyoChecked[o.id]){ tekiyoTotal += o.pt; tekiyoDetail.push(`${o.label} = ${o.pt}点`); }
   });
   let jikaNaifukuPt = 0;
   if(state.jikaNaifuku){
     const unit = state.jikaNaifuku.tablet ? 4 : 20;
-    jikaNaifukuPt = Math.ceil(state.jikaNaifuku.days/7)*unit;
+    const wari = Math.ceil(state.jikaNaifuku.days/7);
+    jikaNaifukuPt = wari*unit;
     tekiyoTotal += jikaNaifukuPt;
+    tekiyoDetail.push(`自家製剤加算（内服）：${state.jikaNaifuku.days}日分 ÷ 7日 切上げ${wari}回 × ${unit}点 = ${jikaNaifukuPt}点`);
   }
 
   // ---- 薬学管理料 ----
   let kanriGakuTotal = 0;
-  KANRI.forEach(o=>{ if(state.kanriChecked[o.id]) kanriGakuTotal += o.pt; });
+  const kanriGakuDetail = [];
+  KANRI.forEach(o=>{ if(state.kanriChecked[o.id]){ kanriGakuTotal += o.pt; kanriGakuDetail.push(`${o.label} = ${o.pt}点`); } });
 
   // ---- 基本料関連 ----
   const kihonryoObj = KIHONRYO.find(o=>o.id===state.settings.kihonryo) || {pt:0};
   const chiikiObj = CHIIKI.find(o=>o.id===state.settings.chiiki) || {pt:0};
   let sonotaTotal = 0;
-  SONOTA.forEach(o=>{ if(state.settings.sonota[o.id]) sonotaTotal += o.pt; });
+  const sonotaDetail = [];
+  SONOTA.forEach(o=>{ if(state.settings.sonota[o.id]){ sonotaTotal += o.pt; sonotaDetail.push(`${o.label} = ${o.pt>0?'+':''}${o.pt}点`); } });
 
   const kihonTotal = kihonryoObj.pt + chiikiObj.pt + sonotaTotal;
 
@@ -855,11 +1019,20 @@ function calcAll(){
   let jikangaiPt = 0;
   if(jikangaiObj && jikangaiObj.type==='pct'){
     jikangaiPt = Math.round(kiso*jikangaiObj.rate);
+    detail.jikangai = `基礎額（調剤基本料${kihonTotal}点＋薬剤調製料${chouseiTotal}点＋調剤管理料${kanriBase}点＝${kiso}点） × ${Math.round(jikangaiObj.rate*100)}% = ${jikangaiPt}点`;
   } else if(jikangaiObj && jikangaiObj.type==='flat'){
     jikangaiPt = jikangaiObj.pt;
+    detail.jikangai = `夜間・休日等加算：一律 ${jikangaiPt}点`;
   }
 
-  const grandTotal = kihonTotal + chouseiTotal + yakuzaiTotal + kanriBase + tekiyoTotal + kanriGakuTotal + jikangaiPt;
+  // ---- 調剤物価対応料 ----
+  const bukkaPt = state.bukkaEnabled ? bukkaPoints() : 0;
+  if(state.bukkaEnabled){
+    const cutoffPassed = new Date() >= new Date(2027,5,1);
+    detail.bukka = `調剤物価対応料：${cutoffPassed?'令和9年6月1日以降のため':'令和9年5月31日以前のため'} ${bukkaPt}点`;
+  }
+
+  const grandTotal = kihonTotal + chouseiTotal + yakuzaiTotal + kanriBase + tekiyoTotal + kanriGakuTotal + jikangaiPt + bukkaPt;
 
   const futanObj = FUTAN.find(o=>o.id===state.futan) || {ratio:0};
   const yenBeforeRatio = grandTotal*10;
@@ -867,12 +1040,12 @@ function calcAll(){
   payment = Math.round(payment/10)*10; // 10円未満四捨五入
 
   return {
-    kihonryoObj, chiikiObj, sonotaTotal, kihonTotal,
+    kihonryoObj, chiikiObj, sonotaTotal, sonotaDetail, kihonTotal,
     naifukuYaku, gaiyouYaku, chushaYaku, yakuzaiTotal,
     freqTypesCount:freqTypes.length, tonpuku:naifukuTonpuku.length>0, picosCount:naifukuPicos.length,
     gaiyouDrugTypesCount:gaiyouDrugTypes.length, chushaPresent:chusha.length>0,
-    chouseiTotal, kanriBase, tekiyoTotal, jikaNaifukuPt, kanriGakuTotal,
-    jikangaiPt, jikangaiObj, grandTotal, futanObj, payment, yenBeforeRatio,
+    chouseiTotal, kanriBase, tekiyoTotal, tekiyoDetail, jikaNaifukuPt, kanriGakuTotal, kanriGakuDetail,
+    jikangaiPt, jikangaiObj, bukkaPt, grandTotal, futanObj, payment, yenBeforeRatio, detail,
   };
 }
 
@@ -889,34 +1062,74 @@ function renderResult(){
   if(r.tekiyoTotal) rows.push(['加算（無菌製剤・麻薬等・自家製剤・計量混合等）', r.tekiyoTotal]);
   if(r.kanriGakuTotal) rows.push(['薬学管理料', r.kanriGakuTotal]);
   if(r.jikangaiPt) rows.push([r.jikangaiObj.label, r.jikangaiPt]);
+  if(r.bukkaPt) rows.push(['調剤物価対応料', r.bukkaPt]);
 
   tbl.innerHTML = rows.map(([label,pt])=>`<tr><td>${label}</td><td>${pt.toLocaleString()}点</td></tr>`).join('')
     + `<tr class="total"><td>総点数</td><td>${r.grandTotal.toLocaleString()}点</td></tr>`;
 
   document.getElementById('totalPointsOut').textContent = r.grandTotal.toLocaleString()+' 点';
   document.getElementById('totalYenOut').textContent = r.payment.toLocaleString()+' 円　'+`（${r.futanObj.label}）`;
+
+  // ---- 詳細計算式 ----
+  const d = r.detail;
+  const groups = [];
+  const kihonLines = [`調剤基本料：${r.kihonryoObj.label} = ${r.kihonryoObj.pt}点`];
+  if(r.chiikiObj.pt) kihonLines.push(`${r.chiikiObj.label} = ${r.chiikiObj.pt}点`);
+  r.sonotaDetail.forEach(s=>kihonLines.push(s));
+  groups.push(['調剤基本料まわり', kihonLines]);
+  if(d.yaku.length) groups.push(['薬剤料', d.yaku]);
+  if(d.chousei.length) groups.push(['薬剤調製料', d.chousei]);
+  if(d.kanri.length) groups.push(['調剤管理料', d.kanri]);
+  if(r.tekiyoDetail.length) groups.push(['調剤技術料への加算', r.tekiyoDetail]);
+  if(r.kanriGakuDetail.length) groups.push(['薬学管理料', r.kanriGakuDetail]);
+  if(d.jikangai) groups.push(['時間外等加算', [d.jikangai]]);
+  if(d.bukka) groups.push(['調剤物価対応料', [d.bukka]]);
+  groups.push(['お会計金額', [
+    `総点数 ${r.grandTotal}点 × 10円 = ${r.yenBeforeRatio.toLocaleString()}円`,
+    `${r.yenBeforeRatio.toLocaleString()}円 × ${r.futanObj.label} = ${(r.yenBeforeRatio*r.futanObj.ratio).toLocaleString()}円 → 10円未満四捨五入 → ${r.payment.toLocaleString()}円`,
+  ]]);
+
+  document.getElementById('detailArea').innerHTML = groups.map(([title,lines],idx)=>`
+    <details class="detailgrp" ${idx<2?'open':''}>
+      <summary>${title}</summary>
+      ${lines.map(l=>`<div class="formula">${l}</div>`).join('')}
+    </details>
+  `).join('') || '<p class="empty">処方が入力されていません</p>';
 }
 
-function resetPrescription(){
-  if(!confirm('現在の処方入力内容をすべてクリアします。よろしいですか？')) return;
+function clearPrescriptionState(){
   state.items = [];
+  state.editingId = null;
   state.pendingDrug=null;
   state.tekiyoChecked = {};
   state.jikaNaifuku = null;
   state.kanriChecked = {};
   state.jikangai='none';
+  state.bukkaEnabled = true;
   renderItemList();
   renderPending();
   renderTekiyoOpts();
   renderKanriOpts();
   renderJikangaiOpts();
+  renderBukkaOpts();
   document.getElementById('jikaNaifukuBox').style.display='none';
+}
+
+function resetPrescription(){
+  if(!confirm('現在の処方入力内容をすべてクリアします。よろしいですか？')) return;
+  clearPrescriptionState();
+}
+
+function startNewPrescription(){
+  clearPrescriptionState();
+  showTab('prescribe');
 }
 
 function printResult(){ window.print(); }
 
 // ---------- 初期化 ----------
 renderSettingsTab();
+renderBukkaOpts();
 renderTekiyoOpts();
 renderKanriOpts();
 renderJikangaiOpts();
