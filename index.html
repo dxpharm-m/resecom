@@ -288,6 +288,26 @@
     font-variant-numeric:tabular-nums;
   }
   .editbtn{background:none;border:none;color:var(--teal);cursor:pointer;font-size:.95rem;}
+  label.opt.freq{
+    padding:16px 14px;
+    font-size:1rem;
+    font-weight:700;
+    border-width:2px;
+    border-radius:12px;
+  }
+  label.opt.freq input{transform:scale(1.25);}
+  label.opt.freq .pt{font-size:.85rem;font-weight:600;}
+  #kanriFreqOpts{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
+  .tekiyo-row{
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 10px;
+    margin-bottom:6px;
+    background:#fafaf8;
+  }
+  .tekiyo-row .opt{border:none;background:none;padding:2px 0;}
+  .tekiyo-multi{display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:24px;}
+  .tekiyo-multi label.opt.small{padding:4px 8px;font-size:.76rem;border-style:dashed;}
   .flexbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
   footer{
     text-align:center;
@@ -381,6 +401,8 @@
 
     <div class="card">
       <h2><span class="num">4</span>薬学管理料（該当するもののみ）</h2>
+      <div class="grid" id="kanriFreqOpts" style="margin-bottom:12px;"></div>
+      <p class="note" style="margin-bottom:6px;">その他の薬学管理料</p>
       <div class="grid" id="kanriOpts"></div>
     </div>
 
@@ -497,8 +519,8 @@ const FUTAN = [
   {id:'10', label:'10割（自費）', ratio:1.0},
 ];
 const KANRI = [
-  {id:'m1', label:'服薬管理指導料（3ヶ月以内・手帳あり）', pt:45},
-  {id:'m2', label:'服薬管理指導料（上記以外）', pt:59},
+  {id:'m1', label:'服薬管理指導料（3ヶ月以内・手帳あり）', pt:45, freq:true},
+  {id:'m2', label:'服薬管理指導料（上記以外）', pt:59, freq:true},
   {id:'m3', label:'麻薬管理指導加算', pt:22},
   {id:'m4', label:'特定薬剤管理指導加算1（新規）', pt:10},
   {id:'m5', label:'特定薬剤管理指導加算1（指導の必要）', pt:5},
@@ -559,6 +581,8 @@ const state = {
   items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
   editingId: null,
   tekiyoChecked: {}, // id -> true
+  tekiyoMulti: {}, // id -> true (2回以上算定)
+  tekiyoQty: {}, // id -> number (算定回数、2回以上算定時のみ使用)
   jikaNaifuku: null, // {days, tablet}
   kanriChecked: {},
   jikangai: 'none',
@@ -619,15 +643,39 @@ function renderSettingsTab(){
 // ---------- 加算・管理料・時間外・負担割 描画 ----------
 function renderTekiyoOpts(){
   const el = document.getElementById('tekiyoOpts');
-  el.innerHTML = '<div class="grid">' + TEKIYO.map(o=>{
-    if(o.special) return '';
-    return `<label class="opt"><input type="checkbox" data-id="${o.id}" ${state.tekiyoChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>`;
-  }).join('') + `<label class="opt"><input type="checkbox" id="jikaNaifukuChk" ${state.jikaNaifuku?'checked':''}>自家製剤加算（内服）<span class="pt badge">計算式別</span></label>` + '</div>';
+  el.innerHTML = TEKIYO.filter(o=>!o.special).map(o=>{
+    const checked = !!state.tekiyoChecked[o.id];
+    const multi = !!state.tekiyoMulti[o.id];
+    const qty = state.tekiyoQty[o.id] || 2;
+    return `
+      <div class="tekiyo-row">
+        <label class="opt"><input type="checkbox" class="tChk" data-id="${o.id}" ${checked?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>
+        ${checked ? `
+        <div class="tekiyo-multi">
+          <label class="opt small"><input type="checkbox" class="tMulti" data-id="${o.id}" ${multi?'checked':''}>2回以上算定</label>
+          ${multi ? `<label style="font-size:.78rem;color:var(--ink-soft);">算定回数<input type="number" class="tQty" data-id="${o.id}" min="2" value="${qty}" style="width:70px;margin-left:6px;"></label>` : ''}
+        </div>` : ''}
+      </div>
+    `;
+  }).join('') + `<label class="opt" style="margin-top:6px;"><input type="checkbox" id="jikaNaifukuChk" ${state.jikaNaifuku?'checked':''}>自家製剤加算（内服）<span class="pt badge">計算式別</span></label>`;
 
-  el.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
-    state.tekiyoChecked[e.target.dataset.id] = e.target.checked;
-    renderItemList();
+  el.querySelectorAll('.tChk').forEach(cb=>cb.addEventListener('change', e=>{
+    const id = e.target.dataset.id;
+    state.tekiyoChecked[id] = e.target.checked;
+    if(!e.target.checked) state.tekiyoMulti[id] = false;
+    renderTekiyoOpts();
   }));
+  el.querySelectorAll('.tMulti').forEach(cb=>cb.addEventListener('change', e=>{
+    const id = e.target.dataset.id;
+    state.tekiyoMulti[id] = e.target.checked;
+    if(e.target.checked && !state.tekiyoQty[id]) state.tekiyoQty[id] = 2;
+    renderTekiyoOpts();
+  }));
+  el.querySelectorAll('.tQty').forEach(inp=>inp.addEventListener('input', e=>{
+    const id = e.target.dataset.id;
+    state.tekiyoQty[id] = Math.max(2, Number(e.target.value)||2);
+  }));
+
   document.getElementById('jikaNaifukuChk').addEventListener('change', e=>{
     const box = document.getElementById('jikaNaifukuBox');
     if(e.target.checked){
@@ -648,13 +696,16 @@ function renderTekiyoOpts(){
 }
 
 function renderKanriOpts(){
-  const el = document.getElementById('kanriOpts');
-  el.innerHTML = KANRI.map(o=>`
-    <label class="opt"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>
-  `).join('');
-  el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
-    state.kanriChecked[e.target.dataset.id] = e.target.checked;
-  }));
+  const freqEl = document.getElementById('kanriFreqOpts');
+  const otherEl = document.getElementById('kanriOpts');
+  const mk = (o, cls)=>`<label class="opt ${cls||''}"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>`;
+  freqEl.innerHTML = KANRI.filter(o=>o.freq).map(o=>mk(o,'freq')).join('');
+  otherEl.innerHTML = KANRI.filter(o=>!o.freq).map(o=>mk(o)).join('');
+  [freqEl, otherEl].forEach(el=>{
+    el.querySelectorAll('input').forEach(i=>i.addEventListener('change', e=>{
+      state.kanriChecked[e.target.dataset.id] = e.target.checked;
+    }));
+  });
 }
 
 function renderJikangaiOpts(){
@@ -982,10 +1033,21 @@ function calcAll(){
     detail.chousei.push(`ピコスルファート ${naifukuPicos.length}品目 × 10点 = ${naifukuPicos.length*10}点`);
   }
 
+  // 計量混合調剤加算（軟膏）を算定した件数だけ、外用の剤数（薬剤調製料の算定対象）から差し引く
+  const nankouMixQty = state.tekiyoChecked['t13']
+    ? (state.tekiyoMulti['t13'] ? (state.tekiyoQty['t13']||2) : 1)
+    : 0;
   const gaiyouDrugTypes = [...new Set(gaiyou.map(i=>i.name))].slice(0,3);
   if(gaiyouDrugTypes.length>0){
-    chouseiTotal += gaiyouDrugTypes.length*10;
-    detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 × 10点 = ${gaiyouDrugTypes.length*10}点`);
+    const reduceCount = Math.min(nankouMixQty, gaiyouDrugTypes.length);
+    const netCount = gaiyouDrugTypes.length - reduceCount;
+    const pt = netCount*10;
+    chouseiTotal += pt;
+    if(reduceCount>0){
+      detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 − 計量混合調剤加算（軟膏）算定${reduceCount}件 = ${netCount}剤 × 10点 = ${pt}点`);
+    } else {
+      detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 × 10点 = ${pt}点`);
+    }
   }
 
   if(chusha.length>0){
@@ -1019,7 +1081,12 @@ function calcAll(){
   const tekiyoDetail = [];
   TEKIYO.forEach(o=>{
     if(o.special) return;
-    if(state.tekiyoChecked[o.id]){ tekiyoTotal += o.pt; tekiyoDetail.push(`${o.label} = ${o.pt}点`); }
+    if(state.tekiyoChecked[o.id]){
+      const qty = state.tekiyoMulti[o.id] ? (state.tekiyoQty[o.id]||2) : 1;
+      const sub = o.pt*qty;
+      tekiyoTotal += sub;
+      tekiyoDetail.push(qty>1 ? `${o.label} × ${qty}回 = ${sub}点` : `${o.label} = ${sub}点`);
+    }
   });
   let jikaNaifukuPt = 0;
   if(state.jikaNaifuku){
@@ -1133,6 +1200,8 @@ function clearPrescriptionState(){
   state.editingId = null;
   state.pendingDrug=null;
   state.tekiyoChecked = {};
+  state.tekiyoMulti = {};
+  state.tekiyoQty = {};
   state.jikaNaifuku = null;
   state.kanriChecked = {};
   state.jikangai='none';
