@@ -386,6 +386,19 @@
       <div id="itemListWrap"><p class="empty">まだ医薬品が追加されていません</p></div>
     </div>
 
+    <div class="card" id="mixGroupCard" style="display:none;">
+      <h2><span class="num">🧪</span>計量混合調剤加算のグループ設定</h2>
+      <p class="note">実際に混ぜ合わせた薬剤をチェックしてグループ化してください。3剤以上を混合した場合も、そのグループはまとめて1剤としてカウントされます（薬剤調製料の剤数から自動で差し引かれます）。</p>
+      <div id="mixDraftArea"></div>
+      <div id="mixGroupList"></div>
+    </div>
+
+    <div class="card" id="sameFormCard" style="display:none;">
+      <h2><span class="num">💡</span>同一有効成分・同一剤形の候補</h2>
+      <p class="note">「同一有効成分・同一剤形の外用薬は、数にかかわらず1調剤」というルールに該当しそうな組み合わせを自動検出しています。薬品名からの推定のため、最終確認は薬剤師の判断でお願いします。</p>
+      <div id="sameFormInner"></div>
+    </div>
+
     <div class="card">
       <h2><span class="num">3</span>調剤技術料への加算（該当するもののみ）</h2>
       <div id="tekiyoOpts"></div>
@@ -498,7 +511,7 @@ const CHIIKI = [
 ];
 const SONOTA = [
   {id:'renkei', label:'連携強化加算', pt:5},
-  {id:'kohatsu', label:'後発医薬品調剤体制減算', pt:-5},
+  {id:'kohatsu', label:'後発医薬品減算', pt:-5},
   {id:'denshi', label:'電子的調剤情報連携体制整備加算', pt:8},
   {id:'monzen', label:'門前薬局等立地依存減算', pt:-15},
   {id:'base_up', label:'ベースアップ評価料', pt:4},
@@ -558,6 +571,10 @@ const KANRI = [
   {id:'m20', label:'服薬情報等提供料1', pt:30},
   {id:'m21', label:'服薬情報等提供料2', pt:20},
   {id:'m22', label:'服薬情報等提供料3', pt:50},
+  {id:'m23', label:'調剤時残薬調整加算（在宅・かかりつけ）', pt:50},
+  {id:'m24', label:'調剤時残薬調整加算（それ以外）', pt:30},
+  {id:'m25', label:'薬学的有害事象等防止加算（在宅・かかりつけ）', pt:50},
+  {id:'m26', label:'薬学的有害事象等防止加算（それ以外）', pt:30},
 ];
 // 加算（数量入力式：チェック＋数量で pt×数量）
 const TEKIYO = [
@@ -571,11 +588,49 @@ const TEKIYO = [
   {id:'t8', label:'自家製剤加算（錠剤・坐剤）', pt:90, qty:false},
   {id:'t9', label:'自家製剤加算（点眼・点鼻・点耳・浣腸）', pt:75, qty:false},
   {id:'t10', label:'自家製剤加算（液剤／内服・外用）', pt:45, qty:false},
-  {id:'t11', label:'計量混合調剤加算（液剤）', pt:35, qty:false},
-  {id:'t12', label:'計量混合調剤加算（散剤）', pt:45, qty:false},
-  {id:'t13', label:'計量混合調剤加算（軟膏）', pt:80, qty:false},
   {id:'jika_naifuku', label:'自家製剤加算（内服）※計算方法が異なります', pt:0, special:'jika_naifuku'},
 ];
+const MIX_TYPES = [
+  {id:'eki', label:'計量混合調剤加算（液剤）', pt:35},
+  {id:'san', label:'計量混合調剤加算（散剤）', pt:45},
+  {id:'nankou', label:'計量混合調剤加算（軟膏）', pt:80},
+];
+
+// 「同一有効成分・同一剤形の外用薬は数にかかわらず1調剤」ルールの剤形判定用キーワード
+// より具体的なキーワードを先に判定するよう順序に注意（例：眼軟膏は軟膏より先）
+const DOSAGE_FORM_RULES = [
+  ['ganseikou', ['眼軟膏']],
+  ['nankou', ['軟膏']],
+  ['cream', ['クリーム']],
+  ['lotion', ['ローション']],
+  ['gel', ['ゲル']],
+  ['tenganeki', ['点眼']],
+  ['tenbi', ['点鼻']],
+  ['tenji', ['点耳']],
+  ['jibika', ['耳鼻科用']],
+  ['kyuaero', ['エアゾール', 'エアロゾル']],
+  ['kyufun', ['吸入用散', '吸入粉末']],
+  ['kyueki', ['吸入液']],
+  ['funmu', ['噴霧', 'スプレー']],
+  ['pap', ['パップ']],
+  ['tape', ['テープ', '貼付']],
+  ['kouko', ['硬膏']],
+  ['suppository', ['坐剤', '坐薬']],
+  ['vaginal', ['膣']],
+  ['chuchou', ['注腸']],
+  ['kousou', ['口嗽', 'うがい']],
+  ['troche', ['トローチ']],
+  ['zeri', ['ゼリー']],
+  ['powder', ['パウダー']],
+  ['eki', ['液']],
+];
+function detectDosageForm(name){
+  if(!name) return null;
+  for(const [form, kws] of DOSAGE_FORM_RULES){
+    if(kws.some(k=>name.includes(k))) return form;
+  }
+  return null; // 判定できないものは自動候補にしない（安全側）
+}
 
 // 内服 用法（1日回数→タイミング候補）
 const NAIFUKU_FREQ = {
@@ -600,6 +655,12 @@ const state = {
   tekiyoChecked: {}, // id -> true
   tekiyoMulti: {}, // id -> true (2回以上算定)
   tekiyoQty: {}, // id -> number (算定回数、2回以上算定時のみ使用)
+  mixGroups: [], // {id, type:'eki'|'san'|'nankou', itemIds:[...]} 計量混合調剤加算のグループ（3剤以上混合にも対応）
+  mixDraftIds: new Set(), // グループ作成中に選択中のitem id
+  mixDraftType: 'nankou',
+  sameFormGroups: [], // {id, itemIds:[...]} 同一有効成分・同一剤形で確定した1剤扱いグループ
+  sameFormDismissed: new Set(), // 一度「別剤のまま」を選んだ候補（itemIds.join(',')）は再提案しない
+  sameFormDraftIds: new Set(), // 手動でグループを作る際に選択中のitem id
   jikaNaifuku: null, // {days, tablet}
   kanriChecked: {},
   gairai2: null, // {days} 外来服薬支援料2（一包化）
@@ -875,7 +936,7 @@ function editItem(id){
   if(!item) return;
   state.editingId = id;
   state.pendingDrug = {
-    name:item.name, generic:'', spec:'', price:item.price, cat:item.cat, isPicos:item.isPicos,
+    name:item.name, generic:item.generic||'', spec:item.spec||'', price:item.price, cat:item.cat, isPicos:item.isPicos,
     prefill:{dailyDose:item.dailyDose, freq:item.freq, timing:item.timing, days:item.days},
   };
   renderPending();
@@ -994,7 +1055,7 @@ function addPendingItem(){
   } else {
     state.items.push({
       id: 'it'+Date.now()+Math.random().toString(36).slice(2,7),
-      cat:d.cat, name:d.name, price:d.price, dailyDose:dose, freq, timing, days,
+      cat:d.cat, name:d.name, generic:d.generic||'', spec:d.spec||'', price:d.price, dailyDose:dose, freq, timing, days,
       isPicos:d.isPicos,
     });
   }
@@ -1008,12 +1069,25 @@ function addPendingItem(){
 
 function removeItem(id){
   state.items = state.items.filter(i=>i.id!==id);
+  state.mixDraftIds.delete(id);
+  state.sameFormDraftIds.delete(id);
+  state.mixGroups = state.mixGroups
+    .map(g=>({...g, itemIds:g.itemIds.filter(iid=>iid!==id)}))
+    .filter(g=>g.itemIds.length>=2); // 2剤未満になったグループは解消
+  state.sameFormGroups = state.sameFormGroups
+    .map(g=>({...g, itemIds:g.itemIds.filter(iid=>iid!==id)}))
+    .filter(g=>g.itemIds.length>=2);
   renderItemList();
 }
 
 function renderItemList(){
   const wrap = document.getElementById('itemListWrap');
-  if(state.items.length===0){ wrap.innerHTML='<p class="empty">まだ医薬品が追加されていません</p>'; return; }
+  if(state.items.length===0){
+    wrap.innerHTML='<p class="empty">まだ医薬品が追加されていません</p>';
+    renderMixGroups();
+    renderSameFormSuggestions();
+    return;
+  }
   wrap.innerHTML = `<table class="itemtbl"><thead><tr>
     <th>区分</th><th>薬品名</th><th>用法</th><th>量／日数</th><th></th>
   </tr></thead><tbody>
@@ -1027,6 +1101,169 @@ function renderItemList(){
     </tr>
   `).join('')}
   </tbody></table>`;
+  renderMixGroups();
+  renderSameFormSuggestions();
+}
+
+// ---------- 計量混合調剤加算のグループ設定（3剤以上混合にも対応） ----------
+function renderMixGroups(){
+  const card = document.getElementById('mixGroupCard');
+  if(state.items.length < 2){ card.style.display='none'; return; }
+  card.style.display='block';
+
+  const draftArea = document.getElementById('mixDraftArea');
+  draftArea.innerHTML = `
+    <div class="fieldline" style="margin-bottom:8px;">
+      <label>加算の種類<select id="mixDraftTypeSel">
+        ${MIX_TYPES.map(t=>`<option value="${t.id}" ${state.mixDraftType===t.id?'selected':''}>${t.label}（${t.pt}点）</option>`).join('')}
+      </select></label>
+    </div>
+    <div class="grid" style="margin-bottom:8px;">
+      ${state.items.map(i=>`
+        <label class="opt small"><input type="checkbox" class="mixDraftChk" data-id="${i.id}" ${state.mixDraftIds.has(i.id)?'checked':''}>${CAT_LABEL[i.cat]}／${i.name}</label>
+      `).join('')}
+    </div>
+    <button class="btn ghost" onclick="addMixGroup()">＋ このグループを追加（${state.mixDraftIds.size}件選択中）</button>
+  `;
+  document.getElementById('mixDraftTypeSel').addEventListener('change', e=>{ state.mixDraftType = e.target.value; });
+  draftArea.querySelectorAll('.mixDraftChk').forEach(cb=>cb.addEventListener('change', e=>{
+    const id = e.target.dataset.id;
+    if(e.target.checked) state.mixDraftIds.add(id); else state.mixDraftIds.delete(id);
+    renderMixGroups();
+  }));
+
+  const listEl = document.getElementById('mixGroupList');
+  if(state.mixGroups.length===0){ listEl.innerHTML=''; return; }
+  listEl.innerHTML = state.mixGroups.map(g=>{
+    const typeObj = MIX_TYPES.find(t=>t.id===g.type);
+    const names = g.itemIds.map(id=>{ const it = state.items.find(i=>i.id===id); return it ? it.name : '(削除済み)'; });
+    return `<div class="tekiyo-row">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div><strong>${typeObj.label}</strong>：${names.join('＋')}（${names.length}剤 → 1剤扱い）<span class="pt" style="margin-left:8px;">${typeObj.pt}点</span></div>
+        <button class="rowdel" onclick="removeMixGroup('${g.id}')" title="削除">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addMixGroup(){
+  if(state.mixDraftIds.size < 2){ alert('混合したグループとして登録するには、2剤以上を選択してください。'); return; }
+  state.mixGroups.push({
+    id: 'mg'+Date.now()+Math.random().toString(36).slice(2,6),
+    type: state.mixDraftType,
+    itemIds: [...state.mixDraftIds],
+  });
+  state.mixDraftIds = new Set();
+  renderMixGroups();
+}
+
+function removeMixGroup(id){
+  state.mixGroups = state.mixGroups.filter(g=>g.id!==id);
+  renderMixGroups();
+}
+
+// ---------- 同一有効成分・同一剤形の候補（提案→ボタンで確定方式） ----------
+function findSameFormCandidates(){
+  const mergedIds = new Set([
+    ...state.mixGroups.flatMap(g=>g.itemIds),
+    ...state.sameFormGroups.flatMap(g=>g.itemIds),
+  ]);
+  const gaiyou = state.items.filter(i=>i.cat==='gaiyou' && !mergedIds.has(i.id));
+  const buckets = {};
+  gaiyou.forEach(i=>{
+    if(!i.generic) return;
+    const form = detectDosageForm(i.name);
+    if(!form) return; // 判定できないものは候補に出さない
+    const key = i.generic+'|'+form;
+    (buckets[key] = buckets[key]||[]).push(i);
+  });
+  return Object.values(buckets).filter(arr=>arr.length>=2);
+}
+
+function renderSameFormSuggestions(){
+  const card = document.getElementById('sameFormCard');
+  const inner = document.getElementById('sameFormInner');
+  const gaiyouItems = state.items.filter(i=>i.cat==='gaiyou');
+  const candidates = findSameFormCandidates().filter(arr=>{
+    const key = arr.map(i=>i.id).sort().join(',');
+    return !state.sameFormDismissed.has(key);
+  });
+  const confirmed = state.sameFormGroups.filter(g=>g.itemIds.some(id=>state.items.some(i=>i.id===id)));
+
+  if(candidates.length===0 && confirmed.length===0 && gaiyouItems.length<2){ card.style.display='none'; return; }
+  card.style.display='block';
+
+  let html = '';
+  candidates.forEach(arr=>{
+    const key = arr.map(i=>i.id).sort().join(',');
+    html += `
+      <div class="pending">
+        <div class="drugname">💡 ${arr.map(i=>i.name).join('＋')}</div>
+        <p class="note" style="margin-bottom:8px;">成分名「${arr[0].generic}」で同一剤形と推定されました。1剤としてまとめられそうです。</p>
+        <div class="flexbtns">
+          <button class="btn" onclick="confirmSameFormGroup('${key}')">1剤にまとめる</button>
+          <button class="btn ghost" onclick="dismissSameFormGroup('${key}')">今回は別剤のままにする</button>
+        </div>
+      </div>`;
+  });
+  confirmed.forEach(g=>{
+    const names = g.itemIds.map(id=>{ const it=state.items.find(i=>i.id===id); return it?it.name:'(削除済み)'; });
+    html += `
+      <div class="tekiyo-row">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>✅ 同一成分・同一剤形として1剤扱い：${names.join('＋')}</div>
+          <button class="rowdel" onclick="removeSameFormGroup('${g.id}')" title="解除">✕</button>
+        </div>
+      </div>`;
+  });
+
+  if(gaiyouItems.length>=2){
+    html += `
+      <div class="tekiyo-row">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:8px;">手動でグループを作る（自動検出に出てこない場合はこちら）</div>
+        <div class="grid" style="margin-bottom:8px;">
+          ${gaiyouItems.map(i=>`<label class="opt small"><input type="checkbox" class="sameFormDraftChk" data-id="${i.id}" ${state.sameFormDraftIds.has(i.id)?'checked':''}>${i.name}</label>`).join('')}
+        </div>
+        <button class="btn ghost" onclick="confirmSameFormManual()">＋ 1剤としてまとめる（${state.sameFormDraftIds.size}件選択中）</button>
+      </div>`;
+  }
+
+  inner.innerHTML = html;
+  inner.querySelectorAll('.sameFormDraftChk').forEach(cb=>cb.addEventListener('change', e=>{
+    const id = e.target.dataset.id;
+    if(e.target.checked) state.sameFormDraftIds.add(id); else state.sameFormDraftIds.delete(id);
+    renderSameFormSuggestions();
+  }));
+}
+
+function confirmSameFormManual(){
+  if(state.sameFormDraftIds.size < 2){ alert('1剤としてまとめるには、2剤以上を選択してください。'); return; }
+  state.sameFormGroups.push({
+    id: 'sf'+Date.now()+Math.random().toString(36).slice(2,6),
+    itemIds: [...state.sameFormDraftIds],
+  });
+  state.sameFormDraftIds = new Set();
+  renderSameFormSuggestions();
+}
+
+function confirmSameFormGroup(key){
+  const itemIds = key.split(',');
+  state.sameFormGroups.push({
+
+    id: 'sf'+Date.now()+Math.random().toString(36).slice(2,6),
+    itemIds,
+  });
+  renderSameFormSuggestions();
+}
+
+function dismissSameFormGroup(key){
+  state.sameFormDismissed.add(key);
+  renderSameFormSuggestions();
+}
+
+function removeSameFormGroup(id){
+  state.sameFormGroups = state.sameFormGroups.filter(g=>g.id!==id);
+  renderSameFormSuggestions();
 }
 
 // ---------- 計算ロジック ----------
@@ -1096,21 +1333,30 @@ function calcAll(){
     detail.chousei.push(`ピコスルファート ${naifukuPicos.length}品目 × 10点 = ${naifukuPicos.length*10}点`);
   }
 
-  // 計量混合調剤加算（軟膏）を算定した件数だけ、外用の剤数（薬剤調製料の算定対象）から差し引く
-  const nankouMixQty = state.tekiyoChecked['t13']
-    ? (state.tekiyoMulti['t13'] ? (state.tekiyoQty['t13']||2) : 1)
-    : 0;
-  const gaiyouDrugTypes = [...new Set(gaiyou.map(i=>i.name))].slice(0,3);
-  if(gaiyouDrugTypes.length>0){
-    const reduceCount = Math.min(nankouMixQty, gaiyouDrugTypes.length);
-    const netCount = gaiyouDrugTypes.length - reduceCount;
-    const pt = netCount*10;
+  // 外用の剤数：計量混合グループ、同一有効成分・同一剤形グループは、それぞれ何剤あっても「1剤」としてカウントする
+  const gaiyouMixGroups = state.mixGroups.filter(g=>g.itemIds.some(id=>gaiyou.some(i=>i.id===id)));
+  const mixGroupedIds = new Set(gaiyouMixGroups.flatMap(g=>g.itemIds));
+  const gaiyouSameFormGroups = state.sameFormGroups.filter(g=>
+    g.itemIds.some(id=>gaiyou.some(i=>i.id===id)) && !g.itemIds.some(id=>mixGroupedIds.has(id))
+  );
+  const sameFormGroupedIds = new Set(gaiyouSameFormGroups.flatMap(g=>g.itemIds));
+  const standaloneGaiyouNames = [...new Set(gaiyou.filter(i=>!mixGroupedIds.has(i.id) && !sameFormGroupedIds.has(i.id)).map(i=>i.name))];
+  const gaiyouZaiTotal = standaloneGaiyouNames.length + gaiyouMixGroups.length + gaiyouSameFormGroups.length;
+  const gaiyouZaiCapped = Math.min(3, gaiyouZaiTotal);
+  if(gaiyouZaiTotal>0){
+    const pt = gaiyouZaiCapped*10;
     chouseiTotal += pt;
-    if(reduceCount>0){
-      detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 − 計量混合調剤加算（軟膏）算定${reduceCount}件 = ${netCount}剤 × 10点 = ${pt}点`);
-    } else {
-      detail.chousei.push(`外用・${gaiyouDrugTypes.length}品目 × 10点 = ${pt}点`);
-    }
+    const parts = [...standaloneGaiyouNames];
+    gaiyouMixGroups.forEach(g=>{
+      const typeObj = MIX_TYPES.find(t=>t.id===g.type);
+      const names = g.itemIds.map(id=>{ const it=gaiyou.find(i=>i.id===id); return it?it.name:''; }).filter(Boolean);
+      parts.push(`〔${names.join('＋')}（${typeObj.label}→1剤）〕`);
+    });
+    gaiyouSameFormGroups.forEach(g=>{
+      const names = g.itemIds.map(id=>{ const it=gaiyou.find(i=>i.id===id); return it?it.name:''; }).filter(Boolean);
+      parts.push(`〔${names.join('＋')}（同一成分同一剤形→1剤）〕`);
+    });
+    detail.chousei.push(`外用：${parts.join('＋')} = ${gaiyouZaiCapped}剤 × 10点 = ${pt}点`);
   }
 
   if(chusha.length>0){
@@ -1126,9 +1372,9 @@ function calcAll(){
       const key = i.freq+'|'+i.timing+'|'+i.days;
       if(!(key in groups)) groups[key] = {days:i.days, label:i.freq+(i.timing?'／'+i.timing:'')};
     });
-    const keys = Object.keys(groups).slice(0,3);
-    keys.forEach(k=>{
-      const g = groups[k];
+    // 3種類までしか算定できないため、日数が長い（＝点数が高い）グループから優先して採用する
+    const groupList = Object.values(groups).sort((a,b)=>b.days-a.days).slice(0,3);
+    groupList.forEach(g=>{
       const pt = g.days>=28 ? 60 : 10;
       kanriBase += pt;
       detail.kanri.push(`内服／${g.label}・${g.days}日分 → ${g.days>=28?'28日分以上':'27日分以下'} = ${pt}点`);
@@ -1150,6 +1396,13 @@ function calcAll(){
       tekiyoTotal += sub;
       tekiyoDetail.push(qty>1 ? `${o.label} × ${qty}回 = ${sub}点` : `${o.label} = ${sub}点`);
     }
+  });
+  state.mixGroups.forEach(g=>{
+    const typeObj = MIX_TYPES.find(t=>t.id===g.type);
+    if(!typeObj) return;
+    const names = g.itemIds.map(id=>{ const it=items.find(i=>i.id===id); return it?it.name:''; }).filter(Boolean);
+    tekiyoTotal += typeObj.pt;
+    tekiyoDetail.push(`${typeObj.label}：${names.join('＋')} = ${typeObj.pt}点`);
   });
   let jikaNaifukuPt = 0;
   if(state.jikaNaifuku){
@@ -1212,7 +1465,7 @@ function calcAll(){
     kihonryoObj, chiikiObj, sonotaTotal, sonotaDetail, kihonTotal,
     naifukuYaku, gaiyouYaku, chushaYaku, yakuzaiTotal,
     freqTypesCount:freqTypes.length, tonpuku:naifukuTonpuku.length>0, picosCount:naifukuPicos.length,
-    gaiyouDrugTypesCount:gaiyouDrugTypes.length, chushaPresent:chusha.length>0,
+    gaiyouDrugTypesCount:gaiyouZaiCapped, chushaPresent:chusha.length>0,
     chouseiTotal, kanriBase, tekiyoTotal, tekiyoDetail, jikaNaifukuPt, kanriGakuTotal, kanriGakuDetail,
     jikangaiPt, jikangaiObj, bukkaPt, grandTotal, futanObj, payment, yenBeforeRatio, detail,
   };
@@ -1273,6 +1526,12 @@ function clearPrescriptionState(){
   state.tekiyoChecked = {};
   state.tekiyoMulti = {};
   state.tekiyoQty = {};
+  state.mixGroups = [];
+  state.mixDraftIds = new Set();
+  state.mixDraftType = 'nankou';
+  state.sameFormGroups = [];
+  state.sameFormDismissed = new Set();
+  state.sameFormDraftIds = new Set();
   state.jikaNaifuku = null;
   state.kanriChecked = {};
   state.gairai2 = null;
