@@ -323,7 +323,7 @@
 <header>
   <h1>💊 薬局レセコン電卓 <small>2026年6月改定対応</small></h1>
   <nav class="tabs">
-    <button data-tab="settings" class="active">① 基本料設定</button>
+    <button data-tab="settings" class="active">① 基本設定</button>
     <button data-tab="prescribe">② 処方入力</button>
     <button data-tab="result">③ 結果</button>
   </nav>
@@ -331,7 +331,7 @@
 
 <main>
 
-  <!-- ============ TAB 1: 基本料設定 ============ -->
+  <!-- ============ TAB 1: 基本設定 ============ -->
   <section id="tab-settings" class="panel active">
     <div class="warn">この設定は薬局ごとに一度決めればOK。ブラウザに保存され、次回処方時もそのまま使われます（変更したらここで直せます）。</div>
 
@@ -349,6 +349,12 @@
     <div class="card">
       <h2><span class="num">3</span>その他の基本料加算（複数選択可）</h2>
       <div class="grid" id="sonotaOpts"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">4</span>時間外等加算（該当する場合のみ）</h2>
+      <p class="note">基礎額＝調剤基本料＋薬剤調製料＋無菌製剤処理加算＋調剤管理料 に対する加算です。こちらは処方箋を受け付けるタイミング（時間帯）によって毎回変わるものなので、処方ごとに見直してください。</p>
+      <div class="grid" id="jikangaiOpts"></div>
     </div>
 
     <div class="card">
@@ -428,24 +434,18 @@
     </div>
 
     <div class="card">
-      <h2><span class="num">5</span>時間外等加算（該当する場合のみ）</h2>
-      <p class="note">基礎額＝調剤基本料＋薬剤調製料＋無菌製剤処理加算＋調剤管理料 に対する加算です。</p>
-      <div class="grid" id="jikangaiOpts"></div>
-    </div>
-
-    <div class="card">
-      <h2><span class="num">6</span>調剤物価対応料</h2>
+      <h2><span class="num">5</span>調剤物価対応料</h2>
       <p class="note">全処方箋に自動算定される加算です。令和9年6月1日（2027年6月1日）以降は2点に改定されます。</p>
       <div class="grid" id="bukkaOpts"></div>
     </div>
 
     <div class="card">
-      <h2><span class="num">7</span>患者負担割合</h2>
+      <h2><span class="num">6</span>患者負担割合</h2>
       <div class="grid" id="futanOpts"></div>
     </div>
 
     <div class="flexbtns">
-      <button class="btn ghost" onclick="showTab('settings')">← ① 基本料設定に戻る</button>
+      <button class="btn ghost" onclick="showTab('settings')">← ① 基本設定に戻る</button>
       <button class="btn" onclick="showTab('result')">③ 結果を見る →</button>
       <button class="btn ghost" onclick="resetPrescription()">この処方をクリア</button>
     </div>
