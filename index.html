@@ -323,10 +323,6 @@
     margin-top:8px;
     font-variant-numeric:tabular-nums;
   }
-  .favstar{
-    background:none;border:none;cursor:pointer;font-size:.95rem;
-    color:#c9a227; flex:0 0 auto; padding:0 2px;
-  }
   @media print{
     header, nav.tabs, footer, .flexbtns, .searchwrap, #drugResults,
     #pendingArea, #mixGroupCard, #sameFormCard, #bulkDaysWrap,
@@ -669,11 +665,9 @@ const CHUSHA_FREQ = ['1日1回','1日2回','1日3回','1日〇回','フリー入
 
 // ---------- 状態管理 ----------
 const LS_SETTINGS = 'recepc_settings_v1';
-const LS_FAVORITES = 'recepc_favorites_v1';
 const LS_DRAFT = 'recepc_draft_v1';
 const state = {
   settings: loadSettings(),
-  favorites: loadFavorites(), // [{cat, row}] お気に入り医薬品（薬局ごとに永続）
   currentCat: 'all',
   pendingDrug: null,
   items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
@@ -704,32 +698,6 @@ function loadSettings(){
 }
 function saveSettings(){
   localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
-}
-
-// ---------- お気に入り医薬品 ----------
-function loadFavorites(){
-  try{
-    const raw = localStorage.getItem(LS_FAVORITES);
-    if(raw) return JSON.parse(raw);
-  }catch(e){}
-  return [];
-}
-function saveFavorites(){
-  localStorage.setItem(LS_FAVORITES, JSON.stringify(state.favorites));
-}
-function favoriteKey(cat, row){ return cat+'|'+row[0]+'|'+row[2]; }
-function isFavorite(cat, row){
-  const key = favoriteKey(cat, row);
-  return state.favorites.some(f=>favoriteKey(f.cat,f.row)===key);
-}
-function toggleFavorite(cat, rowJsonEscaped){
-  const row = JSON.parse(rowJsonEscaped);
-  const key = favoriteKey(cat, row);
-  const idx = state.favorites.findIndex(f=>favoriteKey(f.cat,f.row)===key);
-  if(idx>=0) state.favorites.splice(idx,1);
-  else state.favorites.push({cat, row});
-  saveFavorites();
-  runDrugSearch();
 }
 
 // ---------- タブ切替 ----------
@@ -912,25 +880,15 @@ let searchHighlightIndex = -1;
 
 function rowHtml(res, idx){
   const r = res.row;
-  const fav = isFavorite(res.cat, r);
-  const rowJson = JSON.stringify(r).replace(/"/g,'&quot;');
   return `
     <div class="row" data-idx="${idx}">
-      <button class="favstar" data-cat="${res.cat}" data-row="${rowJson}" title="お気に入り登録/解除">${fav?'★':'☆'}</button>
       <span class="rowmain" style="flex:1;"><span class="badge" style="margin-left:0;margin-right:6px;">${CAT_LABEL[res.cat]}</span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
       <span class="meta">${r[3]}円${r[6]?'｜麻':''}</span>
     </div>`;
 }
 function attachRowHandlers(resEl, results){
-  resEl.querySelectorAll('.favstar').forEach(btn=>{
-    btn.addEventListener('click', ev=>{
-      ev.stopPropagation();
-      toggleFavorite(btn.dataset.cat, btn.dataset.row);
-    });
-  });
   resEl.querySelectorAll('.row[data-idx]').forEach(el=>{
-    el.addEventListener('click', (ev)=>{
-      if(ev.target.closest('.favstar')) return; // 星クリックでは選択しない
+    el.addEventListener('click', ()=>{
       const res = results[Number(el.dataset.idx)];
       selectDrug(res.row, res.cat);
       resEl.innerHTML='';
@@ -944,14 +902,7 @@ function runDrugSearch(){
   const q = drugSearchInput.value.trim();
   const resEl = document.getElementById('drugResults');
   searchHighlightIndex = -1;
-  if(!q){
-    if(state.favorites.length===0){ resEl.innerHTML=''; searchResultsCache=[]; return; }
-    searchResultsCache = state.favorites.map(f=>({row:f.row, cat:f.cat}));
-    resEl.innerHTML = `<div class="row" style="cursor:default;"><span style="color:var(--ink-soft);font-size:.72rem;">☆ よく使う薬（クリックまたはEnterで追加）</span></div>`
-      + searchResultsCache.map((res,idx)=>rowHtml(res, idx)).join('');
-    attachRowHandlers(resEl, searchResultsCache);
-    return;
-  }
+  if(!q){ resEl.innerHTML=''; searchResultsCache=[]; return; }
   const terms = q.split(/\s+/).filter(Boolean).map(t=>hiraToKana(t.toLowerCase()));
   const cats = state.currentCat==='all' ? ['naifuku','gaiyou','chusha'] : [state.currentCat];
   let results = [];
