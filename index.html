@@ -316,12 +316,34 @@
     padding:24px 16px 10px;
   }
   ::selection{background:var(--teal-light);}
+  #drugResults div.row.highlighted{background:var(--teal-light);}
+  .headerTotal{
+    font-size:.72rem;
+    opacity:.85;
+    margin-top:8px;
+    font-variant-numeric:tabular-nums;
+  }
+  .favstar{
+    background:none;border:none;cursor:pointer;font-size:.95rem;
+    color:#c9a227; flex:0 0 auto; padding:0 2px;
+  }
+  @media print{
+    header, nav.tabs, footer, .flexbtns, .searchwrap, #drugResults,
+    #pendingArea, #mixGroupCard, #sameFormCard, #bulkDaysWrap,
+    .editbtn, .rowdel, #tab-settings, #tab-prescribe { display:none !important; }
+    body{ padding:0; background:#fff; }
+    main{ padding:0; max-width:none; }
+    .card{ border:1px solid #ccc; box-shadow:none; break-inside:avoid; }
+    .totalbox{ background:#fff !important; color:#000 !important; border:2px solid #000; }
+    .detailgrp{ break-inside:avoid; }
+  }
 </style>
 </head>
 <body>
 
 <header>
   <h1>💊 薬局レセコン電卓 <small>2026年6月改定対応</small></h1>
+  <div class="headerTotal" id="headerTotal">現在の合計：0点（0円）</div>
   <nav class="tabs">
     <button data-tab="settings" class="active">① 基本設定</button>
     <button data-tab="prescribe">② 処方入力</button>
@@ -413,7 +435,7 @@
         <div class="drugname">自家製剤加算（内服）の点数計算</div>
         <p class="note" style="margin-bottom:8px;">内服の自家製剤加算は他と計算方法が異なり、7日分につき20点（錠剤分割は4点）で算定します。</p>
         <div class="fieldline">
-          <label>算定日数<input type="number" id="jikaDays" min="1" value="7" style="width:80px;"></label>
+          <label>算定日数<input type="number" id="jikaDays" min="1" value="7" inputmode="numeric" style="width:80px;"></label>
           <label class="opt" style="margin-top:16px;"><input type="checkbox" id="jikaTablet"> 錠剤の分割（4点/7日）</label>
         </div>
       </div>
@@ -428,7 +450,7 @@
         <div class="drugname">外来服薬支援料2（一包化）の点数計算</div>
         <p class="note" style="margin-bottom:8px;">投薬日数に応じて自動で点数を判定します。</p>
         <div class="fieldline">
-          <label>投薬日数<input type="number" id="gairai2Days" min="1" value="7" style="width:90px;"></label>
+          <label>投薬日数<input type="number" id="gairai2Days" min="1" value="7" inputmode="numeric" style="width:90px;"></label>
           <span class="pt" id="gairai2PtPreview" style="margin-top:16px;"></span>
         </div>
       </div>
@@ -647,8 +669,11 @@ const CHUSHA_FREQ = ['1日1回','1日2回','1日3回','1日〇回','フリー入
 
 // ---------- 状態管理 ----------
 const LS_SETTINGS = 'recepc_settings_v1';
+const LS_FAVORITES = 'recepc_favorites_v1';
+const LS_DRAFT = 'recepc_draft_v1';
 const state = {
   settings: loadSettings(),
+  favorites: loadFavorites(), // [{cat, row}] お気に入り医薬品（薬局ごとに永続）
   currentCat: 'all',
   pendingDrug: null,
   items: [], // {id,cat,name,price,dailyDose,freq,timing,days,isPicos}
@@ -663,7 +688,7 @@ const state = {
   sameFormDismissed: new Set(), // 一度「別剤のまま」を選んだ候補（itemIds.join(',')）は再提案しない
   sameFormDraftIds: new Set(), // 手動でグループを作る際に選択中のitem id
   jikaNaifuku: null, // {days, tablet}
-  kanriChecked: {},
+  kanriChecked: {m1:true}, // 服薬管理指導料はデフォルトで45点（m1）を選択
   gairai2: null, // {days} 外来服薬支援料2（一包化）
   jikangai: 'none',
   bukkaEnabled: true,
@@ -679,6 +704,32 @@ function loadSettings(){
 }
 function saveSettings(){
   localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
+}
+
+// ---------- お気に入り医薬品 ----------
+function loadFavorites(){
+  try{
+    const raw = localStorage.getItem(LS_FAVORITES);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return [];
+}
+function saveFavorites(){
+  localStorage.setItem(LS_FAVORITES, JSON.stringify(state.favorites));
+}
+function favoriteKey(cat, row){ return cat+'|'+row[0]+'|'+row[2]; }
+function isFavorite(cat, row){
+  const key = favoriteKey(cat, row);
+  return state.favorites.some(f=>favoriteKey(f.cat,f.row)===key);
+}
+function toggleFavorite(cat, rowJsonEscaped){
+  const row = JSON.parse(rowJsonEscaped);
+  const key = favoriteKey(cat, row);
+  const idx = state.favorites.findIndex(f=>favoriteKey(f.cat,f.row)===key);
+  if(idx>=0) state.favorites.splice(idx,1);
+  else state.favorites.push({cat, row});
+  saveFavorites();
+  runDrugSearch();
 }
 
 // ---------- タブ切替 ----------
@@ -733,7 +784,7 @@ function renderTekiyoOpts(){
         ${checked ? `
         <div class="tekiyo-multi">
           <label class="opt small"><input type="checkbox" class="tMulti" data-id="${o.id}" ${multi?'checked':''}>2回以上算定</label>
-          ${multi ? `<label style="font-size:.78rem;color:var(--ink-soft);">算定回数<input type="number" class="tQty" data-id="${o.id}" min="2" value="${qty}" style="width:70px;margin-left:6px;"></label>` : ''}
+          ${multi ? `<label style="font-size:.78rem;color:var(--ink-soft);">算定回数<input type="number" class="tQty" data-id="${o.id}" min="2" value="${qty}" inputmode="numeric" style="width:70px;margin-left:6px;"></label>` : ''}
         </div>` : ''}
       </div>
     `;
@@ -779,14 +830,25 @@ function renderKanriOpts(){
   const freqEl = document.getElementById('kanriFreqOpts');
   const otherEl = document.getElementById('kanriOpts');
   const mk = (o, cls)=>`<label class="opt ${cls||''}"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>`;
-  freqEl.innerHTML = KANRI.filter(o=>o.freq).map(o=>mk(o,'freq')).join('');
+  // 服薬管理指導料（45点／59点）は同時に2つは選べないが、両方外す（未算定）ことも可能にする
+  freqEl.innerHTML = KANRI.filter(o=>o.freq).map(o=>`
+    <label class="opt freq"><input type="checkbox" data-id="${o.id}" ${state.kanriChecked[o.id]?'checked':''}>${o.label}<span class="pt">${o.pt}点</span></label>
+  `).join('');
   otherEl.innerHTML = KANRI.filter(o=>!o.freq && !o.special).map(o=>mk(o)).join('')
     + `<label class="opt"><input type="checkbox" id="gairai2Chk" ${state.gairai2?'checked':''}>外来服薬支援料2（一包化）<span class="pt badge">日数で自動計算</span></label>`;
-  [freqEl, otherEl].forEach(el=>{
-    el.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
-      state.kanriChecked[e.target.dataset.id] = e.target.checked;
-    }));
-  });
+
+  freqEl.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
+    if(e.target.checked){
+      KANRI.filter(o=>o.freq).forEach(o=>{ state.kanriChecked[o.id] = false; });
+      state.kanriChecked[e.target.dataset.id] = true;
+      renderKanriOpts();
+    } else {
+      state.kanriChecked[e.target.dataset.id] = false;
+    }
+  }));
+  otherEl.querySelectorAll('input[data-id]').forEach(i=>i.addEventListener('change', e=>{
+    state.kanriChecked[e.target.dataset.id] = e.target.checked;
+  }));
 
   const gairai2Chk = document.getElementById('gairai2Chk');
   const box = document.getElementById('gairai2Box');
@@ -845,10 +907,51 @@ document.querySelectorAll('.catbtns button').forEach(b=>{
 });
 
 const drugSearchInput = document.getElementById('drugSearch');
+let searchResultsCache = []; // 現在表示中の候補（キーボード操作・星クリック用）
+let searchHighlightIndex = -1;
+
+function rowHtml(res, idx){
+  const r = res.row;
+  const fav = isFavorite(res.cat, r);
+  const rowJson = JSON.stringify(r).replace(/"/g,'&quot;');
+  return `
+    <div class="row" data-idx="${idx}">
+      <button class="favstar" data-cat="${res.cat}" data-row="${rowJson}" title="お気に入り登録/解除">${fav?'★':'☆'}</button>
+      <span class="rowmain" style="flex:1;"><span class="badge" style="margin-left:0;margin-right:6px;">${CAT_LABEL[res.cat]}</span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
+      <span class="meta">${r[3]}円${r[6]?'｜麻':''}</span>
+    </div>`;
+}
+function attachRowHandlers(resEl, results){
+  resEl.querySelectorAll('.favstar').forEach(btn=>{
+    btn.addEventListener('click', ev=>{
+      ev.stopPropagation();
+      toggleFavorite(btn.dataset.cat, btn.dataset.row);
+    });
+  });
+  resEl.querySelectorAll('.row[data-idx]').forEach(el=>{
+    el.addEventListener('click', (ev)=>{
+      if(ev.target.closest('.favstar')) return; // 星クリックでは選択しない
+      const res = results[Number(el.dataset.idx)];
+      selectDrug(res.row, res.cat);
+      resEl.innerHTML='';
+      drugSearchInput.value='';
+      searchResultsCache=[]; searchHighlightIndex=-1;
+    });
+  });
+}
+
 function runDrugSearch(){
   const q = drugSearchInput.value.trim();
   const resEl = document.getElementById('drugResults');
-  if(!q){ resEl.innerHTML=''; return; }
+  searchHighlightIndex = -1;
+  if(!q){
+    if(state.favorites.length===0){ resEl.innerHTML=''; searchResultsCache=[]; return; }
+    searchResultsCache = state.favorites.map(f=>({row:f.row, cat:f.cat}));
+    resEl.innerHTML = `<div class="row" style="cursor:default;"><span style="color:var(--ink-soft);font-size:.72rem;">☆ よく使う薬（クリックまたはEnterで追加）</span></div>`
+      + searchResultsCache.map((res,idx)=>rowHtml(res, idx)).join('');
+    attachRowHandlers(resEl, searchResultsCache);
+    return;
+  }
   const terms = q.split(/\s+/).filter(Boolean).map(t=>hiraToKana(t.toLowerCase()));
   const cats = state.currentCat==='all' ? ['naifuku','gaiyou','chusha'] : [state.currentCat];
   let results = [];
@@ -864,24 +967,37 @@ function runDrugSearch(){
       }
     }
   }
+  searchResultsCache = results;
   if(results.length===0){ resEl.innerHTML = '<div class="row"><span>該当する医薬品が見つかりません</span></div>'; return; }
-  resEl.innerHTML = results.map((res,idx)=>{
-    const r = res.row;
-    return `
-    <div class="row" data-idx="${idx}">
-      <span><span class="badge" style="margin-left:0;margin-right:6px;">${CAT_LABEL[res.cat]}</span>${r[0]}<br><span class="meta">${r[1]}｜${r[2]}</span></span>
-      <span class="meta">${r[3]}円${r[6]?'｜麻':''}</span>
-    </div>
-  `;}).join('');
-  resEl.querySelectorAll('.row[data-idx]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const res = results[Number(el.dataset.idx)];
-      selectDrug(res.row, res.cat);
-      resEl.innerHTML='';
-      drugSearchInput.value='';
-    });
-  });
+  resEl.innerHTML = results.map((res,idx)=>rowHtml(res, idx)).join('');
+  attachRowHandlers(resEl, results);
 }
+
+function highlightSearchRow(newIndex){
+  const resEl = document.getElementById('drugResults');
+  const rows = resEl.querySelectorAll('.row[data-idx]');
+  rows.forEach(r=>r.classList.remove('highlighted'));
+  if(newIndex>=0 && newIndex<rows.length){
+    rows[newIndex].classList.add('highlighted');
+    if(rows[newIndex].scrollIntoView) rows[newIndex].scrollIntoView({block:'nearest'});
+  }
+  searchHighlightIndex = newIndex;
+}
+drugSearchInput.addEventListener('keydown', e=>{
+  const resEl = document.getElementById('drugResults');
+  const rows = resEl.querySelectorAll('.row[data-idx]');
+  if(rows.length===0) return;
+  if(e.key==='ArrowDown'){ e.preventDefault(); highlightSearchRow(Math.min(searchHighlightIndex+1, rows.length-1)); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); highlightSearchRow(Math.max(searchHighlightIndex-1,0)); }
+  else if(e.key==='Enter'){
+    e.preventDefault();
+    const idx = searchHighlightIndex>=0 ? searchHighlightIndex : 0;
+    rows[idx].click();
+  } else if(e.key==='Escape'){
+    e.preventDefault();
+    resEl.innerHTML=''; drugSearchInput.value=''; searchResultsCache=[]; searchHighlightIndex=-1;
+  }
+});
 drugSearchInput.addEventListener('input', ()=>{
   if(drugSearchInput.dataset.composing==='1') return; // IME変換中はそのまま（変換確定後にサニタイズ）
   sanitizeSearchInput();
@@ -972,11 +1088,11 @@ function renderPending(){
           : `<span class="pt" style="margin-left:8px;">${d.price}円${d.spec?'／'+d.spec:''}</span>`}
       </div>
       <div class="fieldline">
-        <label><span id="pDoseLabel">${d.isPicos?'総量':(cat==='naifuku'?(pre.freq==='頓服'?'1回量':'1日量'):'総量')}</span><input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" style="width:90px;"></label>
+        <label><span id="pDoseLabel">${d.isPicos?'総量':(cat==='naifuku'?(pre.freq==='頓服'?'1回量':'1日量'):'総量')}</span><input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" inputmode="decimal" style="width:90px;"></label>
         <label>用法<span id="pFreqWrap">${freqHtml}</span></label>
         <span id="pFreqCustomWrap"></span>
         ${cat==='naifuku'?'<label>服用タイミング<span id="pTimingWrap"></span></label><span id="pTimingCustomWrap"></span>':''}
-        ${cat==='naifuku' && !d.isPicos?`<label><span id="pDaysLabel">${pre.freq==='頓服'?'回数分':'日数'}</span><input type="number" id="pDays" min="1" value="${pre.days!=null?pre.days:7}" style="width:80px;"></label>`:''}
+        ${cat==='naifuku' && !d.isPicos?`<label><span id="pDaysLabel">${pre.freq==='頓服'?'回数分':'日数'}</span><input type="number" id="pDays" min="1" value="${pre.days!=null?pre.days:7}" inputmode="numeric" style="width:80px;"></label>`:''}
       </div>
       <p class="note" id="tonpukuNote" style="display:${(!d.isPicos && pre.freq==='頓服')?'block':'none'};margin:6px 0 0;">頓服は「1回量」と「何回分か」を入力してください（日数ではありません）。</p>
       ${d.isPicos?'<p class="note" style="margin:6px 0 0;">内服用滴剤（ピコスルファート等）は「1調剤分の総量」で薬剤料を計算します。日数は薬剤料に影響しません。</p>':''}
@@ -1037,6 +1153,16 @@ function renderPending(){
     renderTiming();
   }
   renderFreqCustom();
+
+  // キーボードだけで完結できるように：入力欄でEnter→追加/保存、Escape→キャンセル
+  el.addEventListener('keydown', ev=>{
+    const tag = ev.target.tagName;
+    if(tag!=='INPUT') return;
+    if(ev.key==='Enter'){ ev.preventDefault(); addPendingItem(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); cancelPending(); }
+  });
+  const doseInput = document.getElementById('pDose');
+  if(doseInput){ doseInput.focus(); doseInput.select(); }
 }
 
 function readFreeValue(selectId, customId, fallback){
@@ -1060,6 +1186,14 @@ function addPendingItem(){
   const timing = d.cat==='naifuku' ? readFreeValue('pTiming','pTimingCustom') : '';
   const daysEl = document.getElementById('pDays');
   const days = (d.cat==='naifuku' && !d.isPicos) ? (Number(daysEl ? daysEl.value : 1)||1) : 1;
+
+  // 明らかに大きすぎる値は入力ミスの可能性があるため一声かける
+  if(dose>0 && dose>=100){
+    if(!confirm(`量が${dose}と大きい値になっていますが、このまま追加しますか？`)) return;
+  }
+  if(d.cat==='naifuku' && !d.isPicos && days>=180){
+    if(!confirm(`${days}日分と長い日数になっていますが、このまま追加しますか？`)) return;
+  }
 
   if(state.editingId){
     const item = state.items.find(i=>i.id===state.editingId);
@@ -1129,7 +1263,7 @@ function renderBulkDaysControl(){
   wrap.innerHTML = `
     <div class="tekiyo-row">
       <div class="fieldline" style="margin:0;">
-        <label>内服の日数を一括変更<input type="number" id="bulkDaysInput" min="1" value="7" style="width:90px;"></label>
+        <label>内服の日数を一括変更<input type="number" id="bulkDaysInput" min="1" value="7" inputmode="numeric" style="width:90px;"></label>
         <button class="btn ghost" onclick="applyBulkDays()">内服${naifukuCount}件すべてに適用</button>
       </div>
     </div>
@@ -1609,7 +1743,7 @@ function clearPrescriptionState(){
   state.sameFormDismissed = new Set();
   state.sameFormDraftIds = new Set();
   state.jikaNaifuku = null;
-  state.kanriChecked = {};
+  state.kanriChecked = {m1:true};
   state.gairai2 = null;
   state.jikangai='none';
   state.bukkaEnabled = true;
@@ -1621,6 +1755,8 @@ function clearPrescriptionState(){
   renderBukkaOpts();
   document.getElementById('jikaNaifukuBox').style.display='none';
   document.getElementById('gairai2Box').style.display='none';
+  clearDraft();
+  refreshHeaderTotal();
 }
 
 function resetPrescription(){
@@ -1635,6 +1771,73 @@ function startNewPrescription(){
 
 function printResult(){ window.print(); }
 
+// ---------- ヘッダー常時表示の合計点数 ----------
+function refreshHeaderTotal(){
+  try{
+    const r = calcAll();
+    const el = document.getElementById('headerTotal');
+    if(el) el.textContent = `現在の合計：${r.grandTotal.toLocaleString()}点（${(r.grandTotal*10).toLocaleString()}円）`;
+  }catch(e){}
+}
+
+// ---------- 処方入力中の内容を一時保存・復元 ----------
+function saveDraft(){
+  try{
+    const snapshot = {
+      items: state.items,
+      tekiyoChecked: state.tekiyoChecked,
+      tekiyoMulti: state.tekiyoMulti,
+      tekiyoQty: state.tekiyoQty,
+      mixGroups: state.mixGroups,
+      sameFormGroups: state.sameFormGroups,
+      sameFormDismissed: [...state.sameFormDismissed],
+      jikaNaifuku: state.jikaNaifuku,
+      kanriChecked: state.kanriChecked,
+      gairai2: state.gairai2,
+      jikangai: state.jikangai,
+      bukkaEnabled: state.bukkaEnabled,
+      futan: state.futan,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(LS_DRAFT, JSON.stringify(snapshot));
+  }catch(e){}
+}
+function clearDraft(){
+  try{ localStorage.removeItem(LS_DRAFT); }catch(e){}
+}
+function loadDraftIfAny(){
+  try{
+    const raw = localStorage.getItem(LS_DRAFT);
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    if(!d.items || d.items.length===0) return;
+    const ageMin = Math.max(0, Math.round((Date.now()-(d.savedAt||0))/60000));
+    const ok = confirm(`前回入力中の処方（医薬品${d.items.length}件・${ageMin}分前）が残っています。復元しますか？`);
+    if(!ok){ clearDraft(); return; }
+    state.items = d.items||[];
+    state.tekiyoChecked = d.tekiyoChecked||{};
+    state.tekiyoMulti = d.tekiyoMulti||{};
+    state.tekiyoQty = d.tekiyoQty||{};
+    state.mixGroups = d.mixGroups||[];
+    state.sameFormGroups = d.sameFormGroups||[];
+    state.sameFormDismissed = new Set(d.sameFormDismissed||[]);
+    state.jikaNaifuku = d.jikaNaifuku||null;
+    state.kanriChecked = d.kanriChecked||{m1:true};
+    state.gairai2 = d.gairai2||null;
+    state.jikangai = d.jikangai||'none';
+    state.bukkaEnabled = d.bukkaEnabled!=null ? d.bukkaEnabled : true;
+    state.futan = d.futan||'3';
+    renderItemList();
+    renderTekiyoOpts();
+    renderKanriOpts();
+    renderJikangaiOpts();
+    renderBukkaOpts();
+    renderFutanOpts();
+    if(state.jikaNaifuku){ const b=document.getElementById('jikaNaifukuBox'); if(b) b.style.display='block'; }
+    if(state.gairai2){ const b=document.getElementById('gairai2Box'); if(b) b.style.display='block'; }
+  }catch(e){}
+}
+
 // ---------- 初期化 ----------
 renderSettingsTab();
 renderBukkaOpts();
@@ -1643,6 +1846,10 @@ renderKanriOpts();
 renderJikangaiOpts();
 renderFutanOpts();
 renderItemList();
+loadDraftIfAny();
+refreshHeaderTotal();
+setInterval(()=>{ refreshHeaderTotal(); saveDraft(); }, 1500);
+window.addEventListener('beforeunload', saveDraft);
 </script>
 </body>
 </html>
