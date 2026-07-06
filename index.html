@@ -390,6 +390,7 @@
       <h2><span class="num">2</span>追加済みの処方リスト</h2>
       <p class="note">✎で内容を修正、✕で削除できます。</p>
       <div id="itemListWrap"><p class="empty">まだ医薬品が追加されていません</p></div>
+      <div id="bulkDaysWrap"></div>
     </div>
 
     <div class="card" id="mixGroupCard" style="display:none;">
@@ -971,12 +972,14 @@ function renderPending(){
           : `<span class="pt" style="margin-left:8px;">${d.price}円${d.spec?'／'+d.spec:''}</span>`}
       </div>
       <div class="fieldline">
-        <label>${cat==='naifuku'?'1日量':'総量'}<input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" style="width:90px;"></label>
+        <label><span id="pDoseLabel">${d.isPicos?'総量':(cat==='naifuku'?(pre.freq==='頓服'?'1回量':'1日量'):'総量')}</span><input type="number" id="pDose" min="0" step="0.01" value="${pre.dailyDose!=null?pre.dailyDose:1}" style="width:90px;"></label>
         <label>用法<span id="pFreqWrap">${freqHtml}</span></label>
         <span id="pFreqCustomWrap"></span>
         ${cat==='naifuku'?'<label>服用タイミング<span id="pTimingWrap"></span></label><span id="pTimingCustomWrap"></span>':''}
-        ${cat==='naifuku'?`<label>日数<input type="number" id="pDays" min="1" value="${pre.days!=null?pre.days:7}" style="width:80px;"></label>`:''}
+        ${cat==='naifuku' && !d.isPicos?`<label><span id="pDaysLabel">${pre.freq==='頓服'?'回数分':'日数'}</span><input type="number" id="pDays" min="1" value="${pre.days!=null?pre.days:7}" style="width:80px;"></label>`:''}
       </div>
+      <p class="note" id="tonpukuNote" style="display:${(!d.isPicos && pre.freq==='頓服')?'block':'none'};margin:6px 0 0;">頓服は「1回量」と「何回分か」を入力してください（日数ではありません）。</p>
+      ${d.isPicos?'<p class="note" style="margin:6px 0 0;">内服用滴剤（ピコスルファート等）は「1調剤分の総量」で薬剤料を計算します。日数は薬剤料に影響しません。</p>':''}
       <div class="flexbtns">
         <button class="btn" onclick="addPendingItem()">${isEditing?'💾 変更を保存':'＋ リストに追加'}</button>
         <button class="btn ghost" onclick="cancelPending()">キャンセル</button>
@@ -999,7 +1002,17 @@ function renderPending(){
       wrap.innerHTML = '';
     }
   };
-  freqSel.addEventListener('change', ()=>{ renderFreqCustom(); if(cat==='naifuku') renderTiming(); });
+  const updateTonpukuLabels = ()=>{
+    if(cat!=='naifuku' || d.isPicos) return;
+    const isTonpuku = freqSel.value==='頓服';
+    const doseLabel = document.getElementById('pDoseLabel');
+    const daysLabel = document.getElementById('pDaysLabel');
+    const note = document.getElementById('tonpukuNote');
+    if(doseLabel) doseLabel.textContent = isTonpuku ? '1回量' : '1日量';
+    if(daysLabel) daysLabel.textContent = isTonpuku ? '回数分' : '日数';
+    if(note) note.style.display = isTonpuku ? 'block' : 'none';
+  };
+  freqSel.addEventListener('change', ()=>{ renderFreqCustom(); if(cat==='naifuku') renderTiming(); updateTonpukuLabels(); });
 
   let renderTiming = ()=>{};
   if(cat==='naifuku'){
@@ -1045,7 +1058,8 @@ function addPendingItem(){
   const dose = Number(document.getElementById('pDose').value)||0;
   const freq = readFreeValue('pFreq','pFreqCustom');
   const timing = d.cat==='naifuku' ? readFreeValue('pTiming','pTimingCustom') : '';
-  const days = d.cat==='naifuku' ? (Number(document.getElementById('pDays').value)||1) : 1;
+  const daysEl = document.getElementById('pDays');
+  const days = (d.cat==='naifuku' && !d.isPicos) ? (Number(daysEl ? daysEl.value : 1)||1) : 1;
 
   if(state.editingId){
     const item = state.items.find(i=>i.id===state.editingId);
@@ -1086,6 +1100,7 @@ function renderItemList(){
     wrap.innerHTML='<p class="empty">まだ医薬品が追加されていません</p>';
     renderMixGroups();
     renderSameFormSuggestions();
+    renderBulkDaysControl();
     return;
   }
   wrap.innerHTML = `<table class="itemtbl"><thead><tr>
@@ -1096,13 +1111,35 @@ function renderItemList(){
       <td class="small">${CAT_LABEL[i.cat]}</td>
       <td class="name">${i.name}${i.isPicos?'<span class="badge">ピコス</span>':''}</td>
       <td class="small">${i.freq}${i.timing?'／'+i.timing:''}</td>
-      <td class="small">${i.dailyDose}${i.cat==='naifuku'?'／日・'+i.days+'日分':'（総量・1日分）'}</td>
+      <td class="small">${i.dailyDose}${i.isPicos?'（総量）':(i.cat==='naifuku'?(i.freq==='頓服'?'／回・'+i.days+'回分':'／日・'+i.days+'日分'):'（総量・1日分）')}</td>
       <td><button class="editbtn" onclick="editItem('${i.id}')" title="修正">✎</button><button class="rowdel" onclick="removeItem('${i.id}')" title="削除">✕</button></td>
     </tr>
   `).join('')}
   </tbody></table>`;
   renderMixGroups();
   renderSameFormSuggestions();
+  renderBulkDaysControl();
+}
+
+// ---------- 内服の日数一括変更 ----------
+function renderBulkDaysControl(){
+  const wrap = document.getElementById('bulkDaysWrap');
+  const naifukuCount = state.items.filter(i=>i.cat==='naifuku').length;
+  if(naifukuCount < 2){ wrap.innerHTML=''; return; } // 1件以下なら一括変更の意味が薄いので非表示
+  wrap.innerHTML = `
+    <div class="tekiyo-row">
+      <div class="fieldline" style="margin:0;">
+        <label>内服の日数を一括変更<input type="number" id="bulkDaysInput" min="1" value="7" style="width:90px;"></label>
+        <button class="btn ghost" onclick="applyBulkDays()">内服${naifukuCount}件すべてに適用</button>
+      </div>
+    </div>
+  `;
+}
+
+function applyBulkDays(){
+  const val = Math.max(1, Number(document.getElementById('bulkDaysInput').value)||1);
+  state.items.forEach(i=>{ if(i.cat==='naifuku') i.days = val; });
+  renderItemList();
 }
 
 // ---------- 計量混合調剤加算のグループ設定（3剤以上混合にも対応） ----------
@@ -1279,6 +1316,10 @@ function yenToPoints(yenTotal){
 function calcAll(){
   const items = state.items;
   const naifuku = items.filter(i=>i.cat==='naifuku');
+  const naifukuNormal = naifuku.filter(i=>i.freq!=='頓服' && !i.isPicos);
+  const naifukuTonpuku = naifuku.filter(i=>i.freq==='頓服' && !i.isPicos);
+  const naifukuPicos = naifuku.filter(i=>i.isPicos);
+  const naifukuForYakuGroup = naifuku.filter(i=>!i.isPicos); // 内服用滴剤（ピコス等）は別枠計算のため除外
   const gaiyou = items.filter(i=>i.cat==='gaiyou');
   const chusha = items.filter(i=>i.cat==='chusha');
   const detail = { yaku:[], chousei:[], kanri:[], jikangai:'', bukka:'' };
@@ -1287,20 +1328,40 @@ function calcAll(){
   // 内服：同一（用法＋タイミング＋日数）でグループ化し、1日薬価合計を丸めてから日数を掛ける
   let naifukuYaku = 0;
   {
+    // 「1剤」は服用時点（用法＋タイミング）が同じかどうかだけで決まり、投与日数は関係ない。
+    // ただし日数が異なる薬が混在する場合、実際に薬剤が重複している期間だけ分けて計算する。
+    // （内服用滴剤＝ピコスルファート等は別枠で計算するためここでは除外）
     const groups = {};
-    naifuku.forEach(i=>{
-      const key = i.freq+'|'+i.timing+'|'+i.days;
-      if(!groups[key]) groups[key] = {yenPerDay:0, days:i.days, label:i.freq+(i.timing?'／'+i.timing:''), names:[]};
-      groups[key].yenPerDay += i.price*i.dailyDose;
-      groups[key].names.push(i.name+'('+i.price+'円×'+i.dailyDose+')');
+    naifukuForYakuGroup.forEach(i=>{
+      const key = i.freq+'|'+i.timing;
+      if(!groups[key]) groups[key] = {label:i.freq+(i.timing?'／'+i.timing:''), items:[]};
+      groups[key].items.push(i);
     });
     Object.values(groups).forEach(g=>{
-      const pt = yenToPoints(g.yenPerDay);
-      const sub = pt*g.days;
-      naifukuYaku += sub;
-      detail.yaku.push(`【内服／${g.label}・${g.days}日分】 ${g.names.join('＋')} = ${g.yenPerDay.toFixed(2)}円/日 → ${g.yenPerDay.toFixed(2)}÷10=${(g.yenPerDay/10).toFixed(2)} を五捨五超入 → ${pt}点/日 × ${g.days}日 = ${sub}点`);
+      const boundaries = [...new Set(g.items.map(i=>i.days))].sort((a,b)=>a-b);
+      let prevBoundary = 0;
+      boundaries.forEach(boundary=>{
+        const segLen = boundary - prevBoundary;
+        const activeItems = g.items.filter(i=>i.days>=boundary);
+        const yenPerDay = activeItems.reduce((s,i)=>s+i.price*i.dailyDose,0);
+        const pt = yenToPoints(yenPerDay);
+        const sub = pt*segLen;
+        naifukuYaku += sub;
+        const names = activeItems.map(i=>i.name+'('+i.price+'円×'+i.dailyDose+')').join('＋');
+        const segNote = boundaries.length>1 ? `（${prevBoundary+1}〜${boundary}日目分）` : '';
+        detail.yaku.push(`【内服／${g.label}${segNote}】 ${names} = ${yenPerDay.toFixed(2)}円/日 → ${yenPerDay.toFixed(2)}÷10=${(yenPerDay/10).toFixed(2)} を五捨五超入 → ${pt}点/日 × ${segLen}日 = ${sub}点`);
+        prevBoundary = boundary;
+      });
     });
   }
+  // 内服用滴剤（ピコスルファート等）：1日量×日数ではなく「1調剤分の総量」を1単位として、品目ごとに個別に丸める
+  let picosYaku = 0;
+  naifukuPicos.forEach(i=>{
+    const yen = i.price*i.dailyDose;
+    const pt = yenToPoints(yen);
+    picosYaku += pt;
+    detail.yaku.push(`【内服用滴剤／${i.name}】 総量${i.dailyDose}×${i.price}円 = ${yen.toFixed(2)}円 → ${(yen/10).toFixed(2)} を五捨五超入 → ${pt}点`);
+  });
   // 外用・注射：総量×薬価をカテゴリ内で合算し、1回だけ丸める
   const gaiyouYen = gaiyou.reduce((s,i)=>s+i.price*i.dailyDose,0);
   const gaiyouYaku = yenToPoints(gaiyouYen);
@@ -1312,17 +1373,14 @@ function calcAll(){
   if(chusha.length>0){
     detail.yaku.push(`【注射】 ${chusha.map(i=>i.name+'('+i.price+'円×'+i.dailyDose+')').join('＋')} = ${chushaYen.toFixed(2)}円 → ${(chushaYen/10).toFixed(2)} を五捨五超入 → ${chushaYaku}点`);
   }
-  const yakuzaiTotal = naifukuYaku+gaiyouYaku+chushaYaku;
+  const yakuzaiTotal = naifukuYaku+picosYaku+gaiyouYaku+chushaYaku;
 
   // ---- 薬剤調製料 ----
   let chouseiTotal = 0;
-  const naifukuNormal = naifuku.filter(i=>i.freq!=='頓服' && !i.isPicos);
-  const naifukuTonpuku = naifuku.filter(i=>i.freq==='頓服' && !i.isPicos);
-  const naifukuPicos = naifuku.filter(i=>i.isPicos);
-  const freqTypes = [...new Set(naifukuNormal.map(i=>i.freq))].slice(0,3);
+  const freqTypes = [...new Set(naifukuNormal.map(i=>i.freq+(i.timing?'／'+i.timing:'')))].slice(0,3);
   if(freqTypes.length>0){
     chouseiTotal += freqTypes.length*24;
-    detail.chousei.push(`内服・用法${freqTypes.length}種類（${freqTypes.join('／')}） × 24点 = ${freqTypes.length*24}点`);
+    detail.chousei.push(`内服・用法${freqTypes.length}種類（${freqTypes.join('、')}） × 24点 = ${freqTypes.length*24}点`);
   }
   if(naifukuTonpuku.length>0){
     chouseiTotal += 21;
@@ -1366,23 +1424,32 @@ function calcAll(){
 
   // ---- 調剤管理料 ----
   let kanriBase = 0;
-  if(naifuku.length>0){
+  if(naifukuForYakuGroup.length>0){
     const groups = {};
-    naifuku.forEach(i=>{
-      const key = i.freq+'|'+i.timing+'|'+i.days;
-      if(!(key in groups)) groups[key] = {days:i.days, label:i.freq+(i.timing?'／'+i.timing:'')};
+    naifukuForYakuGroup.forEach(i=>{
+      // 頓服はどんなタイミング表記でも「頓服」としてまとめて1枠（薬剤調製料の一律21点と同じ考え方）
+      const key = i.freq==='頓服' ? '頓服' : i.freq+'|'+i.timing;
+      const label = i.freq==='頓服' ? '頓服' : i.freq+(i.timing?'／'+i.timing:'');
+      if(!groups[key]) groups[key] = {label, maxDays:i.days};
+      else groups[key].maxDays = Math.max(groups[key].maxDays, i.days);
     });
     // 3種類までしか算定できないため、日数が長い（＝点数が高い）グループから優先して採用する
-    const groupList = Object.values(groups).sort((a,b)=>b.days-a.days).slice(0,3);
+    const groupList = Object.values(groups).sort((a,b)=>b.maxDays-a.maxDays).slice(0,3);
     groupList.forEach(g=>{
-      const pt = g.days>=28 ? 60 : 10;
+      const pt = g.maxDays>=28 ? 60 : 10;
       kanriBase += pt;
-      detail.kanri.push(`内服／${g.label}・${g.days}日分 → ${g.days>=28?'28日分以上':'27日分以下'} = ${pt}点`);
+      detail.kanri.push(`内服／${g.label}・${g.maxDays}日分 → ${g.maxDays>=28?'28日分以上':'27日分以下'} = ${pt}点`);
     });
   } else if(gaiyou.length>0 || chusha.length>0){
     const names = [...new Set([...gaiyou,...chusha].map(i=>i.name))].slice(0,3);
     kanriBase += names.length*10;
     if(names.length>0) detail.kanri.push(`内服なし・外用/注射${names.length}品目 × 10点 = ${names.length*10}点`);
+  }
+  // 内服用滴剤（ピコスルファート等）は、通常の内服3剤カウントとは別枠で1調剤につき4点を加算する
+  if(naifukuPicos.length>0){
+    const picosKanriPt = naifukuPicos.length*4;
+    kanriBase += picosKanriPt;
+    detail.kanri.push(`内服用滴剤（ピコスルファート等） ${naifukuPicos.length}品目 × 4点 = ${picosKanriPt}点（内服3剤の枠とは別カウント）`);
   }
 
   // ---- 加算（無菌製剤・麻薬等・自家製剤・計量混合） ----
@@ -1436,12 +1503,21 @@ function calcAll(){
   const kihonTotal = kihonryoObj.pt + chiikiObj.pt + sonotaTotal;
 
   // ---- 時間外等加算 ----
-  const kiso = kihonTotal + chouseiTotal + kanriBase; // 基礎額（無菌製剤加算等の細部は簡略化）
+  // 基礎額＝調剤基本料＋薬剤調製料＋無菌製剤処理加算＋調剤管理料（無菌製剤処理加算のみ個別に集計する）
+  let muKinTotal = 0;
+  ['t1','t2','t3'].forEach(id=>{
+    const o = TEKIYO.find(t=>t.id===id);
+    if(o && state.tekiyoChecked[id]){
+      const qty = state.tekiyoMulti[id] ? (state.tekiyoQty[id]||2) : 1;
+      muKinTotal += o.pt*qty;
+    }
+  });
+  const kiso = kihonTotal + chouseiTotal + muKinTotal + kanriBase;
   const jikangaiObj = JIKANGAI.find(o=>o.id===state.jikangai);
   let jikangaiPt = 0;
   if(jikangaiObj && jikangaiObj.type==='pct'){
     jikangaiPt = Math.round(kiso*jikangaiObj.rate);
-    detail.jikangai = `基礎額（調剤基本料${kihonTotal}点＋薬剤調製料${chouseiTotal}点＋調剤管理料${kanriBase}点＝${kiso}点） × ${Math.round(jikangaiObj.rate*100)}% = ${jikangaiPt}点`;
+    detail.jikangai = `基礎額（調剤基本料${kihonTotal}点＋薬剤調製料${chouseiTotal}点＋無菌製剤処理加算${muKinTotal}点＋調剤管理料${kanriBase}点＝${kiso}点） × ${Math.round(jikangaiObj.rate*100)}% = ${jikangaiPt}点`;
   } else if(jikangaiObj && jikangaiObj.type==='flat'){
     jikangaiPt = jikangaiObj.pt;
     detail.jikangai = `夜間・休日等加算：一律 ${jikangaiPt}点`;
@@ -1463,7 +1539,7 @@ function calcAll(){
 
   return {
     kihonryoObj, chiikiObj, sonotaTotal, sonotaDetail, kihonTotal,
-    naifukuYaku, gaiyouYaku, chushaYaku, yakuzaiTotal,
+    naifukuYaku, picosYaku, gaiyouYaku, chushaYaku, yakuzaiTotal,
     freqTypesCount:freqTypes.length, tonpuku:naifukuTonpuku.length>0, picosCount:naifukuPicos.length,
     gaiyouDrugTypesCount:gaiyouZaiCapped, chushaPresent:chusha.length>0,
     chouseiTotal, kanriBase, tekiyoTotal, tekiyoDetail, jikaNaifukuPt, kanriGakuTotal, kanriGakuDetail,
@@ -1479,7 +1555,7 @@ function renderResult(){
   if(r.chiikiObj.pt) rows.push(['｜'+r.chiikiObj.label, r.chiikiObj.pt]);
   if(r.sonotaTotal) rows.push(['｜その他基本料加算', r.sonotaTotal]);
   rows.push(['薬剤調製料（内服型'+r.freqTypesCount+'種'+(r.tonpuku?'＋頓服':'')+(r.picosCount?'＋ピコス'+r.picosCount:'')+'／外用'+r.gaiyouDrugTypesCount+'種／注射'+(r.chushaPresent?'あり':'なし')+'）', r.chouseiTotal]);
-  rows.push(['薬剤料（内服'+r.naifukuYaku+'点＋外用'+r.gaiyouYaku+'点＋注射'+r.chushaYaku+'点）', r.yakuzaiTotal]);
+  rows.push(['薬剤料（内服'+r.naifukuYaku+'点'+(r.picosYaku?'＋滴剤'+r.picosYaku+'点':'')+'＋外用'+r.gaiyouYaku+'点＋注射'+r.chushaYaku+'点）', r.yakuzaiTotal]);
   rows.push(['調剤管理料', r.kanriBase]);
   if(r.tekiyoTotal) rows.push(['加算（無菌製剤・麻薬等・自家製剤・計量混合等）', r.tekiyoTotal]);
   if(r.kanriGakuTotal) rows.push(['薬学管理料', r.kanriGakuTotal]);
