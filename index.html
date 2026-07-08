@@ -1671,15 +1671,55 @@ function calcAll(){
 
   const grandTotal = kihonTotal + chouseiTotal + yakuzaiTotal + kanriBase + tekiyoTotal + kanriGakuTotal + jikangaiPt + bukkaPt;
 
-  // ---- 選定療養費（長期収載品の特別料金）：保険点数には含めず、実費として別途加算 ----
-  let senteiTotal = 0;
+  // ---- 選定療養費（長期収載品の特別料金）----
+  // 通常の薬剤料と同じ算定方法（服用時点でグループ化→五捨五超入→日数を掛ける）を、
+  // 薬価の代わりに「長期収載品と後発医薬品の価格差の1/2」だけを使って計算する（選定療養を選んだ品目のみ対象）。
+  let senteiAPoints = 0;
   const senteiDetail = [];
-  items.filter(i=>i.senteiSelected).forEach(i=>{
-    const totalQty = i.cat==='naifuku' ? i.dailyDose*i.days : i.dailyDose;
-    const fee = Math.round(totalQty*i.senteiDiffHalf*1.1);
-    senteiTotal += fee;
-    senteiDetail.push(`${i.name}：${totalQty}単位 × ${i.senteiDiffHalf}円 × 1.1(消費税) = ${fee}円`);
-  });
+  {
+    const selected = naifukuForYakuGroup.filter(i=>i.senteiSelected);
+    const groups = {};
+    selected.forEach(i=>{
+      const key = i.freq+'|'+i.timing;
+      if(!groups[key]) groups[key] = {label:i.freq+(i.timing?'／'+i.timing:''), items:[]};
+      groups[key].items.push(i);
+    });
+    Object.values(groups).forEach(g=>{
+      const boundaries = [...new Set(g.items.map(i=>i.days))].sort((a,b)=>a-b);
+      let prevBoundary = 0;
+      boundaries.forEach(boundary=>{
+        const segLen = boundary - prevBoundary;
+        const activeItems = g.items.filter(i=>i.days>=boundary);
+        const yenPerDay = activeItems.reduce((s,i)=>s+i.senteiDiffHalf*i.dailyDose,0);
+        const pt = yenToPoints(yenPerDay);
+        const sub = pt*segLen;
+        senteiAPoints += sub;
+        const names = activeItems.map(i=>i.name).join('＋');
+        senteiDetail.push(`【内服／${g.label}】 ${names}：価格差の1/2 ${yenPerDay.toFixed(2)}円/日 → ${pt}点/日 × ${segLen}日 = ${sub}点`);
+        prevBoundary = boundary;
+      });
+    });
+  }
+  {
+    const gSel = gaiyou.filter(i=>i.senteiSelected);
+    if(gSel.length){
+      const yen = gSel.reduce((s,i)=>s+i.senteiDiffHalf*i.dailyDose,0);
+      const pt = yenToPoints(yen);
+      senteiAPoints += pt;
+      senteiDetail.push(`【外用】 ${gSel.map(i=>i.name).join('＋')}：価格差の1/2 合計${yen.toFixed(2)}円 → ${pt}点`);
+    }
+  }
+  {
+    const cSel = chusha.filter(i=>i.senteiSelected);
+    if(cSel.length){
+      const yen = cSel.reduce((s,i)=>s+i.senteiDiffHalf*i.dailyDose,0);
+      const pt = yenToPoints(yen);
+      senteiAPoints += pt;
+      senteiDetail.push(`【注射】 ${cSel.map(i=>i.name).join('＋')}：価格差の1/2 合計${yen.toFixed(2)}円 → ${pt}点`);
+    }
+  }
+  const senteiTotal = Math.round(senteiAPoints*10*1.1); // 特別の料金＝点数×10円×消費税
+  if(senteiAPoints>0) senteiDetail.push(`特別の料金：${senteiAPoints}点 × 10円 × 1.1(消費税) = ${senteiTotal}円`);
 
   const futanObj = FUTAN.find(o=>o.id===state.futan) || {ratio:0};
   const yenBeforeRatio = grandTotal*10;
