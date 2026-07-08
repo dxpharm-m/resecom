@@ -424,6 +424,12 @@
       <div id="sameFormInner"></div>
     </div>
 
+    <div class="card" id="senteiCard" style="display:none;">
+      <h2><span class="num">💰</span>選定療養費の対象</h2>
+      <p class="note">長期収載品（後発品のある先発品）が含まれています。患者が先発品を希望する場合はチェックしてください。薬剤料はその分低い金額（後発品最高価格＋差額の1/2）で計算し、差額分は保険外の実費（消費税込み）として別途会計に加算します。</p>
+      <div id="senteiInner"></div>
+    </div>
+
     <div class="card">
       <h2><span class="num">3</span>調剤技術料への加算（該当するもののみ）</h2>
       <div id="tekiyoOpts"></div>
@@ -505,6 +511,7 @@
 <footer>DX薬剤師えむ｜yakkyokudx.com — 個人利用・院内確認用ツールです。公式なレセプト請求システムではありません。</footer>
 
 <script src="drugs.js"></script>
+<script src="sentei.js"></script>
 <script>
 /* ==========================================================
    薬局レセコン電卓 - 2026年6月改定対応
@@ -650,6 +657,13 @@ function detectDosageForm(name){
   }
   return null; // 判定できないものは自動候補にしない（安全側）
 }
+
+// ---------- 選定療養費（長期収載品）対象データ ----------
+// 品名をキーに、特別料金の基礎額（薬価差の1/2・円/単位）を引けるようにする
+const SENTEI_MAP = {};
+(window.SENTEI_DATA||[]).forEach(row=>{
+  SENTEI_MAP[row[0]] = {ingredient:row[1], spec:row[2], price:row[3], diffHalf:row[4]};
+});
 
 // 内服 用法（1日回数→タイミング候補）
 const NAIFUKU_FREQ = {
@@ -1152,10 +1166,15 @@ function addPendingItem(){
       item.dailyDose=dose; item.freq=freq; item.timing=timing; item.days=days;
     }
   } else {
+    const sentei = SENTEI_MAP[d.name];
     state.items.push({
       id: 'it'+Date.now()+Math.random().toString(36).slice(2,7),
       cat:d.cat, name:d.name, generic:d.generic||'', spec:d.spec||'', price:d.price, dailyDose:dose, freq, timing, days,
       isPicos:d.isPicos,
+      senteiEligible: !!sentei,
+      senteiDiffHalf: sentei ? sentei.diffHalf : 0,
+      senteiSelected: false,
+      origPrice: d.price,
     });
   }
   state.pendingDrug=null;
@@ -1186,6 +1205,7 @@ function renderItemList(){
     renderMixGroups();
     renderSameFormSuggestions();
     renderBulkDaysControl();
+    renderSenteiCard();
     return;
   }
   wrap.innerHTML = `<table class="itemtbl"><thead><tr>
@@ -1194,7 +1214,7 @@ function renderItemList(){
   ${state.items.map(i=>`
     <tr>
       <td class="small">${CAT_LABEL[i.cat]}</td>
-      <td class="name">${i.name}${i.isPicos?'<span class="badge">ピコス</span>':''}</td>
+      <td class="name">${i.name}${i.isPicos?'<span class="badge">ピコス</span>':''}${i.senteiSelected?'<span class="badge">選定療養</span>':''}</td>
       <td class="small">${i.freq}${i.timing?'／'+i.timing:''}</td>
       <td class="small">${i.dailyDose}${i.isPicos?'（総量）':(i.cat==='naifuku'?(i.freq==='頓服'?'／回・'+i.days+'回分':'／日・'+i.days+'日分'):'（総量・1日分）')}</td>
       <td><button class="editbtn" onclick="editItem('${i.id}')" title="修正">✎</button><button class="rowdel" onclick="removeItem('${i.id}')" title="削除">✕</button></td>
@@ -1204,7 +1224,41 @@ function renderItemList(){
   renderMixGroups();
   renderSameFormSuggestions();
   renderBulkDaysControl();
+  renderSenteiCard();
 }
+
+// ---------- 選定療養費（長期収載品）対象の選択 ----------
+function renderSenteiCard(){
+  const card = document.getElementById('senteiCard');
+  const inner = document.getElementById('senteiInner');
+  const eligible = state.items.filter(i=>i.senteiEligible);
+  if(eligible.length===0){ card.style.display='none'; return; }
+  card.style.display='block';
+  inner.innerHTML = eligible.map(i=>{
+    const totalQty = i.cat==='naifuku' ? i.dailyDose*i.days : i.dailyDose;
+    const fee = Math.round(totalQty*i.senteiDiffHalf*1.1);
+    return `
+    <div class="tekiyo-row">
+      <label class="opt" style="width:100%;">
+        <input type="checkbox" class="senteiChk" data-id="${i.id}" ${i.senteiSelected?'checked':''}>
+        ${i.name}（${i.origPrice}円／単位）
+        <span class="pt">先発品希望時の実費：約${fee}円</span>
+      </label>
+    </div>`;
+  }).join('');
+  inner.querySelectorAll('.senteiChk').forEach(cb=>cb.addEventListener('change', e=>{
+    toggleSenteiSelected(e.target.dataset.id, e.target.checked);
+  }));
+}
+
+function toggleSenteiSelected(id, checked){
+  const item = state.items.find(i=>i.id===id);
+  if(!item) return;
+  item.senteiSelected = checked;
+  item.price = checked ? (item.origPrice - item.senteiDiffHalf) : item.origPrice;
+  renderItemList();
+}
+
 
 // ---------- 内服の日数一括変更 ----------
 function renderBulkDaysControl(){
@@ -1617,10 +1671,21 @@ function calcAll(){
 
   const grandTotal = kihonTotal + chouseiTotal + yakuzaiTotal + kanriBase + tekiyoTotal + kanriGakuTotal + jikangaiPt + bukkaPt;
 
+  // ---- 選定療養費（長期収載品の特別料金）：保険点数には含めず、実費として別途加算 ----
+  let senteiTotal = 0;
+  const senteiDetail = [];
+  items.filter(i=>i.senteiSelected).forEach(i=>{
+    const totalQty = i.cat==='naifuku' ? i.dailyDose*i.days : i.dailyDose;
+    const fee = Math.round(totalQty*i.senteiDiffHalf*1.1);
+    senteiTotal += fee;
+    senteiDetail.push(`${i.name}：${totalQty}単位 × ${i.senteiDiffHalf}円 × 1.1(消費税) = ${fee}円`);
+  });
+
   const futanObj = FUTAN.find(o=>o.id===state.futan) || {ratio:0};
   const yenBeforeRatio = grandTotal*10;
   let payment = yenBeforeRatio*futanObj.ratio;
   payment = Math.round(payment/10)*10; // 10円未満四捨五入
+  const paymentWithSentei = payment + senteiTotal;
 
   return {
     kihonryoObj, chiikiObj, sonotaTotal, sonotaDetail, kihonTotal,
@@ -1629,6 +1694,7 @@ function calcAll(){
     gaiyouDrugTypesCount:gaiyouZaiCapped, chushaPresent:chusha.length>0,
     chouseiTotal, kanriBase, tekiyoTotal, tekiyoDetail, jikaNaifukuPt, kanriGakuTotal, kanriGakuDetail,
     jikangaiPt, jikangaiObj, bukkaPt, grandTotal, futanObj, payment, yenBeforeRatio, detail,
+    senteiTotal, senteiDetail, paymentWithSentei,
   };
 }
 
@@ -1648,10 +1714,11 @@ function renderResult(){
   if(r.bukkaPt) rows.push(['調剤物価対応料', r.bukkaPt]);
 
   tbl.innerHTML = rows.map(([label,pt])=>`<tr><td>${label}</td><td>${pt.toLocaleString()}点</td></tr>`).join('')
-    + `<tr class="total"><td>総点数</td><td>${r.grandTotal.toLocaleString()}点</td></tr>`;
+    + `<tr class="total"><td>総点数</td><td>${r.grandTotal.toLocaleString()}点</td></tr>`
+    + (r.senteiTotal ? `<tr><td>選定療養費（保険外・実費）</td><td>${r.senteiTotal.toLocaleString()}円</td></tr>` : '');
 
   document.getElementById('totalPointsOut').textContent = r.grandTotal.toLocaleString()+' 点';
-  document.getElementById('totalYenOut').textContent = r.payment.toLocaleString()+' 円　'+`（${r.futanObj.label}）`;
+  document.getElementById('totalYenOut').textContent = r.paymentWithSentei.toLocaleString()+' 円　'+`（${r.futanObj.label}${r.senteiTotal?'＋選定療養費':''}）`;
 
   // ---- 詳細計算式 ----
   const d = r.detail;
@@ -1667,9 +1734,11 @@ function renderResult(){
   if(r.kanriGakuDetail.length) groups.push(['薬学管理料', r.kanriGakuDetail]);
   if(d.jikangai) groups.push(['時間外等加算', [d.jikangai]]);
   if(d.bukka) groups.push(['調剤物価対応料', [d.bukka]]);
+  if(r.senteiDetail.length) groups.push(['選定療養費（保険外・実費）', r.senteiDetail]);
   groups.push(['お会計金額', [
     `総点数 ${r.grandTotal}点 × 10円 = ${r.yenBeforeRatio.toLocaleString()}円`,
     `${r.yenBeforeRatio.toLocaleString()}円 × ${r.futanObj.label} = ${(r.yenBeforeRatio*r.futanObj.ratio).toLocaleString()}円 → 10円未満四捨五入 → ${r.payment.toLocaleString()}円`,
+    ...(r.senteiTotal ? [`${r.payment.toLocaleString()}円 ＋ 選定療養費${r.senteiTotal.toLocaleString()}円 = ${r.paymentWithSentei.toLocaleString()}円`] : []),
   ]]);
 
   document.getElementById('detailArea').innerHTML = groups.map(([title,lines],idx)=>`
