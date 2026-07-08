@@ -389,7 +389,7 @@
 
     <div class="card">
       <h2><span class="num">1</span>医薬品を検索して追加</h2>
-      <p class="note">検索欄はカタカナ・数字のみ入力できます（ひらがなで入力すると自動でカタカナに変換されます）。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
+      <p class="note">検索欄はカタカナ・ひらがな・漢字・数字で入力できます（ひらがなで入力してもカタカナ表記の薬品名にヒットします）。五苓散などの漢方名や「錠」「軟膏」などの漢字を含む品名も検索できます。ただし漢字の読み仮名からの検索（ひらがなで「ごれいさん」と入力して「五苓散」を探す等）には対応していません。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
       <div class="catbtns">
         <button data-cat="all" class="active">すべて</button>
         <button data-cat="naifuku">内服</button>
@@ -975,13 +975,14 @@ drugSearchInput.addEventListener('compositionend', ()=>{
   runDrugSearch();
 });
 
-// 検索欄はカタカナ・数字（＋スペース区切り）のみ許可。ひらがなはカタカナへ自動変換し、
-// それ以外の文字（漢字・アルファベット等）は入力できないよう随時取り除く。
+// 検索欄はカタカナ・ひらがな・漢字・数字（＋スペース区切り）を許可し、
+// アルファベットや記号などそれ以外の文字だけ随時取り除く。ひらがな→カタカナの変換は
+// 検索マッチング側（runDrugSearch）で行うため、入力欄の表示自体は書き換えない。
 function sanitizeSearchInput(){
   const el = drugSearchInput;
   const before = el.value;
-  const converted = hiraToKana(before);
-  const cleaned = converted.replace(/[^\u30A0-\u30FF\uFF66-\uFF9F0-9０-９\s]/g, '');
+  // カタカナ・数字だけでなく、ひらがな・漢字（五苓散などの漢方名や「錠」等を含む品名）もそのまま入力できるようにする
+  const cleaned = before.replace(/[^\u3041-\u3096\u30A0-\u30FF\uFF66-\uFF9F\u4E00-\u9FFF\u3005\u30F60-9０-９\s]/g, '');
   if(cleaned !== before){
     el.value = cleaned;
   }
@@ -1562,29 +1563,19 @@ function calcAll(){
   }
 
   // ---- 調剤管理料 ----
+  // 調剤管理料は受付1回につき1つだけ算定するもので、剤数や用法の種類数に応じて
+  // 3つまで積み上がるものではない（薬剤調製料とは考え方が異なる）。
   let kanriBase = 0;
   if(naifukuForYakuGroup.length>0){
-    const groups = {};
-    naifukuForYakuGroup.forEach(i=>{
-      // 頓服はどんなタイミング表記でも「頓服」としてまとめて1枠（薬剤調製料の一律21点と同じ考え方）
-      const key = i.freq==='頓服' ? '頓服' : i.freq+'|'+i.timing;
-      const label = i.freq==='頓服' ? '頓服' : i.freq+(i.timing?'／'+i.timing:'');
-      if(!groups[key]) groups[key] = {label, maxDays:i.days};
-      else groups[key].maxDays = Math.max(groups[key].maxDays, i.days);
-    });
-    // 3種類までしか算定できないため、日数が長い（＝点数が高い）グループから優先して採用する
-    const groupList = Object.values(groups).sort((a,b)=>b.maxDays-a.maxDays).slice(0,3);
-    groupList.forEach(g=>{
-      const pt = g.maxDays>=28 ? 60 : 10;
-      kanriBase += pt;
-      detail.kanri.push(`内服／${g.label}・${g.maxDays}日分 → ${g.maxDays>=28?'28日分以上':'27日分以下'} = ${pt}点`);
-    });
+    const maxDays = Math.max(...naifukuForYakuGroup.map(i=>i.days));
+    const pt = maxDays>=28 ? 60 : 10;
+    kanriBase = pt;
+    detail.kanri.push(`内服あり・最長${maxDays}日分 → ${maxDays>=28?'28日分以上':'27日分以下'} = ${pt}点`);
   } else if(gaiyou.length>0 || chusha.length>0){
-    const names = [...new Set([...gaiyou,...chusha].map(i=>i.name))].slice(0,3);
-    kanriBase += names.length*10;
-    if(names.length>0) detail.kanri.push(`内服なし・外用/注射${names.length}品目 × 10点 = ${names.length*10}点`);
+    kanriBase = 10;
+    detail.kanri.push(`内服なし・外用/注射あり = 10点`);
   }
-  // 内服用滴剤（ピコスルファート等）は、通常の内服3剤カウントとは別枠で1調剤につき4点を加算する
+  // 内服用滴剤（ピコスルファート等）は、通常の内服の調剤管理料とは別枠で1調剤につき4点を加算する
   if(naifukuPicos.length>0){
     const picosKanriPt = naifukuPicos.length*4;
     kanriBase += picosKanriPt;
