@@ -389,7 +389,7 @@
 
     <div class="card">
       <h2><span class="num">1</span>医薬品を検索して追加</h2>
-      <p class="note">検索欄はカタカナ・ひらがな・漢字・数字で入力できます（ひらがなで入力してもカタカナ表記の薬品名にヒットします）。五苓散などの漢方名や「錠」「軟膏」などの漢字を含む品名も検索できます。ただし漢字の読み仮名からの検索（ひらがなで「ごれいさん」と入力して「五苓散」を探す等）には対応していません。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
+      <p class="note">検索欄はカタカナ・ひらがな・漢字・アルファベット・数字で入力できます（ひらがなで入力してもカタカナ表記の薬品名にヒットし、全角/半角どちらのアルファベット・数字でもヒットします）。五苓散などの漢方名や「錠」「軟膏」などの漢字、「ｍｇ」等のアルファベットを含む品名も検索できます。ただし漢字の読み仮名からの検索（ひらがなで「ごれいさん」と入力して「五苓散」を探す等）には対応していません。内服・外用・注射をまとめて検索し、選んだ薬に応じて入力項目が自動で切り替わります。</p>
       <div class="catbtns">
         <button data-cat="all" class="active">すべて</button>
         <button data-cat="naifuku">内服</button>
@@ -917,7 +917,7 @@ function runDrugSearch(){
   const resEl = document.getElementById('drugResults');
   searchHighlightIndex = -1;
   if(!q){ resEl.innerHTML=''; searchResultsCache=[]; return; }
-  const terms = q.split(/\s+/).filter(Boolean).map(t=>hiraToKana(t.toLowerCase()));
+  const terms = q.split(/\s+/).filter(Boolean).map(t=>zenkakuAlnumToHankaku(hiraToKana(t.toLowerCase())));
   const cats = state.currentCat==='all' ? ['naifuku','gaiyou','chusha'] : [state.currentCat];
   let results = [];
   outer:
@@ -925,7 +925,7 @@ function runDrugSearch(){
     const list = window.DRUG_DATA[cat] || [];
     for(let i=0;i<list.length;i++){
       const row = list[i]; // [品名,成分名,規格,薬価,メーカー,局,麻]
-      const hay = hiraToKana((row[0]+' '+row[1]+' '+row[2]).toLowerCase());
+      const hay = zenkakuAlnumToHankaku(hiraToKana((row[0]+' '+row[1]+' '+row[2]).toLowerCase()));
       if(terms.every(t=>hay.includes(t))){
         results.push({row, cat});
         if(results.length>=60) break outer;
@@ -981,11 +981,15 @@ drugSearchInput.addEventListener('compositionend', ()=>{
 function sanitizeSearchInput(){
   const el = drugSearchInput;
   const before = el.value;
-  // カタカナ・数字だけでなく、ひらがな・漢字（五苓散などの漢方名や「錠」等を含む品名）もそのまま入力できるようにする
-  const cleaned = before.replace(/[^\u3041-\u3096\u30A0-\u30FF\uFF66-\uFF9F\u4E00-\u9FFF\u3005\u30F60-9０-９\s]/g, '');
+  // カタカナ・ひらがな・漢字・数字に加えて、アルファベット（半角・全角）も入力できるようにする
+  const cleaned = before.replace(/[^\u3041-\u3096\u30A0-\u30FF\uFF66-\uFF9F\u4E00-\u9FFF\u3005\u30F60-9０-９A-Za-zＡ-Ｚａ-ｚ\s]/g, '');
   if(cleaned !== before){
     el.value = cleaned;
   }
+}
+// 全角の英数字を半角に正規化する（検索時、全角/半角どちらで入力してもマッチさせるため）
+function zenkakuAlnumToHankaku(s){
+  return s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
 }
 
 // 規格が「１０ｇ」「１０ｍＬ」のように単位のみで表される場合、薬価はその数量あたりの価格。
